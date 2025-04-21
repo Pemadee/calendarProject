@@ -1,23 +1,27 @@
-# main.py
-import os
+# Standard library
 import json
+import os
 import shutil
 from datetime import datetime, timedelta
-from typing import List, Optional
-
-import uvicorn
-from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import JSONResponse
+from typing import Any, Dict, List, Optional, Union
+# Third-party libraries
+from dotenv import load_dotenv
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse, JSONResponse
+from google.auth.transport.requests import Request as GoogleRequest
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
-from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from pydantic import BaseModel
-from dotenv import load_dotenv
+
+# Local application
+from lineChatbot import *
+
 
 # โหลดตัวแปรสภาพแวดล้อม
 load_dotenv()
+
 
 app = FastAPI(title="Google Calendar API", 
               description="API สำหรับดึงข้อมูลการลงเวลาจาก Google Calendar")
@@ -104,7 +108,7 @@ def is_token_valid(user_email: str) -> bool:
             # ถ้า token หมดอายุแต่มี refresh_token
             if creds.expired and creds.refresh_token:
                 try:
-                    creds.refresh(Request())
+                    creds.refresh(GoogleRequest())
                     # บันทึก token ที่รีเฟรชแล้ว
                     with open(token_path, 'w') as token:
                         token.write(creds.to_json())
@@ -119,83 +123,6 @@ def is_token_valid(user_email: str) -> bool:
     except Exception as e:
         print(f"เกิดข้อผิดพลาดในการตรวจสอบ token สำหรับ {user_email}: {str(e)}")
         return False
-
-# def get_credentials(user_email: str):
-#     """รับ credentials สำหรับการเข้าถึง Google Calendar API"""
-#     token_path = os.path.join(TOKEN_DIR, f'token_{user_email}.json')
-#     creds = None
-    
-#     # ตรวจสอบว่ามีไฟล์ token อยู่แล้วหรือไม่และยังใช้งานได้หรือไม่
-#     if os.path.exists(token_path):
-#         try:
-#             with open(token_path, 'r') as token_file:
-#                 token_data = json.load(token_file)
-#                 creds = Credentials.from_authorized_user_info(token_data, SCOPES)
-                
-#                 # ถ้า token ยังใช้งานได้ ก็ใช้ได้เลย
-#                 if creds.valid:
-#                     print(f"ใช้ token ที่มีอยู่แล้วสำหรับ {user_email}")
-#                     return creds
-                    
-#                 # ถ้า token หมดอายุแต่มี refresh_token ให้รีเฟรช
-#                 if creds.expired and creds.refresh_token:
-#                     try:
-#                         creds.refresh(Request())
-#                         with open(token_path, 'w') as token:
-#                             token.write(creds.to_json())
-#                         print(f"รีเฟรช token สำเร็จสำหรับ {user_email}")
-#                         return creds
-#                     except Exception as e:
-#                         print(f"ไม่สามารถรีเฟรช token ได้: {str(e)}")
-#                         creds = None
-#                 else:
-#                     # ถ้าไม่มี refresh_token ต้องสร้าง flow ใหม่
-#                     creds = None
-#         except Exception as e:
-#             print(f"เกิดข้อผิดพลาดในการโหลด token: {str(e)}")
-#             creds = None
-    
-#     # ถ้าไม่มี token หรือ token ใช้ไม่ได้ ต้องสร้าง flow ใหม่
-#     if not creds:
-#         try:
-#             # เตรียมสภาพแวดล้อม
-#             os.environ['OAUTHLIB_RELAX_TOKEN_SCOPE'] = '1'
-            
-#             # สร้าง flow เพื่อยืนยันตัวตน
-#             flow = InstalledAppFlow.from_client_secrets_file(CLIENT_SECRET_FILE, SCOPES)
-#             flow.redirect_uri = REDIRECT_URI
-            
-#             print(f"กำลังสร้างการเชื่อมต่อ OAuth2 สำหรับ {user_email} ด้วย redirect URI: {REDIRECT_URI}")
-            
-#             # เปิดเบราว์เซอร์เพื่อยืนยันตัวตนและขอ refresh_token
-#             creds = flow.run_local_server(
-#                 port=AUTH_PORT,
-#                 access_type='offline',
-#                 prompt='consent'
-#             )
-            
-#             # บันทึก token
-#             with open(token_path, 'w') as token_file:
-#                 token_file.write(creds.to_json())
-                
-#             print(f"การยืนยันตัวตนสำเร็จสำหรับ {user_email}! บันทึก token ที่: {token_path}")
-            
-#             # ตรวจสอบว่ามี refresh_token หรือไม่
-#             token_data = json.loads(creds.to_json())
-#             if 'refresh_token' in token_data:
-#                 print(f"ได้รับ refresh_token สำหรับ {user_email} แล้ว")
-#             else:
-#                 print(f"ไม่ได้รับ refresh_token สำหรับ {user_email} โปรดลองล้าง cookies ของเบราว์เซอร์")
-                
-#         except Exception as e:
-#             print(f"เกิดข้อผิดพลาดในการยืนยันตัวตน: {str(e)}")
-#             raise HTTPException(
-#                 status_code=500, 
-#                 detail=f"เกิดข้อผิดพลาดในการยืนยันตัวตนสำหรับ {user_email}: {str(e)}"
-#             )
-    
-#     return creds
-
 
 def get_credentials(user_email: str):
     """รับ credentials สำหรับการเข้าถึง Google Calendar API"""
@@ -213,7 +140,7 @@ def get_credentials(user_email: str):
     # ถ้าไม่มี token หรือไม่สามารถใช้งานได้ ให้สร้างใหม่
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
+            creds.refresh(GoogleRequest())
         else:
             # สร้าง flow ใหม่
             flow = InstalledAppFlow.from_client_secrets_file(CLIENT_SECRET_FILE, SCOPES)
@@ -290,6 +217,21 @@ def get_calendar_events(user_email: str, calendar_id: str, start_date: str, end_
 @app.get("/")
 def read_root():
     return {"message": "ยินดีต้อนรับสู่ Google Calendar API"}
+
+@app.post("/webhook")
+async def webhook(request: Request):
+    # Get X-Line-Signature header and request body
+    signature = request.headers.get("X-Line-Signature", "")
+    body = await request.body()
+    body_decode = body.decode("utf-8")
+    
+    try:
+        # Handle webhook body
+        handler.handle(body_decode, signature)
+    except InvalidSignatureError:
+        raise HTTPException(status_code=400, detail="Invalid signature")
+    
+    return JSONResponse(content={"status": "OK"})
 
 @app.get("/events/{user_email}")
 def get_user_events(
@@ -551,7 +493,6 @@ def create_bulk_events(event_request: BulkEventRequest):
         "message": f"ดำเนินการสร้างการนัดหมายสำหรับ {len(event_request.user_emails)} คน",
         "results": results
     }
-
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
