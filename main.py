@@ -37,7 +37,12 @@ app.add_middleware(
 )
 
 # กำหนด scope การเข้าถึง Google Calendar
-SCOPES = ['https://www.googleapis.com/auth/calendar', 'https://www.googleapis.com/auth/userinfo.email', 'openid']
+SCOPES = [
+    'https://www.googleapis.com/auth/calendar',
+    'https://www.googleapis.com/auth/calendar.readonly',
+    'https://www.googleapis.com/auth/userinfo.email',
+    'openid'
+]
 #file เก็บข้อมูล client secret ของ OAuth
 CLIENT_SECRET_FILE = os.getenv("CLIENT_SECRET_FILE")
 TOKEN_DIR = 'tokens' # โฟลเดอร์เก็บไฟล์ token
@@ -266,9 +271,10 @@ def oauth2callback(code: str, state: str = None):
         flow.fetch_token(code=code)
         credentials = flow.credentials
         
+       
+
         # สร้าง service
         service = build('calendar', 'v3', credentials=credentials)
-        
         # ดึงข้อมูลปฏิทินเพื่อดูว่าได้รับอนุญาตจากอีเมลอะไร
         calendar = service.calendars().get(calendarId='primary').execute()
         actual_email = calendar.get('id')  # อีเมลของผู้ใช้ที่ใช้ยืนยันตัวตน
