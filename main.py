@@ -2,23 +2,19 @@
 import json
 import os
 import shutil
-import secrets
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Union
 # Third-party libraries
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, status, Form
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
-import pathlib
 from google.auth.transport.requests import Request as GoogleRequest
 from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import Flow
+from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from pydantic import BaseModel
-import pickle
-
+import uvicorn
 
 # Local application
 from lineChatbot import *
@@ -40,22 +36,13 @@ app.add_middleware(
     allow_headers=["*"], # อนุญาตทุก headers
 )
 
-# สร้างโฟลเดอร์สำหรับเก็บ templates
-templates_dir = pathlib.Path("templates")
-if not templates_dir.exists():
-    templates_dir.mkdir()
-    
-# สร้าง templates object
-templates = Jinja2Templates(directory="templates")
-
-# เพิ่มตัวแปรสำหรับเก็บ state token เพื่อป้องกัน CSRF
-state_tokens = {}
-
 # กำหนด scope การเข้าถึง Google Calendar
 SCOPES = ['https://www.googleapis.com/auth/calendar']
 #file เก็บข้อมูล client secret ของ OAuth
 CLIENT_SECRET_FILE = 'client_secret_452392817293-omce8fua8307hkuvlngpvpebvnot3qh1.apps.googleusercontent.com.json'
 TOKEN_DIR = 'tokens' # โฟลเดอร์เก็บไฟล์ token
+REDIRECT_URI = 'http://localhost:8080/'  # กำหนด redirect URI 
+AUTH_PORT = 8080  # พอร์ต redirect
 
 # ลบและสร้างโฟลเดอร์ tokens ใหม่เพื่อหลีกเลี่ยงปัญหา
 try:
@@ -151,24 +138,36 @@ def get_credentials(user_email: str):
         except Exception as e:
             print(f"เกิดข้อผิดพลาดในการโหลด token: {str(e)}")
     
-    # ถ้าไม่มี token หรือไม่สามารถใช้งานได้ ให้ส่งข้อความบอกให้ใช้ /authorize
+    # ถ้าไม่มี token หรือไม่สามารถใช้งานได้ ให้สร้างใหม่
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
-            try:
-                creds.refresh(GoogleRequest())
-                # บันทึก token ที่รีเฟรชแล้ว
-                with open(token_path, 'w') as token_file:
-                    token_file.write(creds.to_json())
-            except Exception as e:
-                raise HTTPException(
-                    status_code=401, 
-                    detail=f"ไม่สามารถรีเฟรช token ได้ กรุณาใช้ /authorize/{user_email} เพื่อยืนยันตัวตนใหม่"
-                )
+            creds.refresh(GoogleRequest())
         else:
-            raise HTTPException(
-                status_code=401,
-                detail=f"คุณยังไม่ได้ยืนยันตัวตน กรุณาใช้ /authorize/{user_email} เพื่อยืนยันตัวตน"
+            # สร้าง flow แบบ web application
+            flow = InstalledAppFlow.from_client_secrets_file(CLIENT_SECRET_FILE, SCOPES)
+            
+            # กำหนด redirect_uri อย่างชัดเจน
+            base_url = os.environ.get('BASE_URL')
+            flow.redirect_uri = f"{base_url}/oauth2callback"
+            
+            # สร้าง authorization URL พร้อมกำหนด state ให้เก็บ email
+            auth_url, _ = flow.authorization_url(
+                access_type='offline',
+                prompt='consent',
+                include_granted_scopes='true',
+                state=user_email  # เก็บ email ใน state เพื่อใช้อ้างอิงตอน callback
             )
+            
+            # ส่งกลับ URL และสถานะที่ต้องการการยืนยันตัวตน
+            return {
+                "requires_auth": True,
+                "auth_url": auth_url,
+                "redirect_uri": flow.redirect_uri
+            }
+        
+        # บันทึก token ใหม่
+        with open(token_path, 'w') as token_file:
+            token_file.write(creds.to_json())
             
     return creds
 
@@ -252,101 +251,40 @@ async def webhook(request: Request):
     
     return JSONResponse(content={"status": "OK"})
 
-# เพิ่มตัวแปรเก็บข้อมูล client_config ชั่วคราว
-flow_configs = {}
-
-@app.get("/authorize/{user_email}")
-def authorize_user(user_email: str):
-    # สร้าง state token เพื่อป้องกัน CSRF
-    state = secrets.token_urlsafe(16)
-    state_tokens[state] = user_email
-    
-    # สร้าง flow
-    flow = Flow.from_client_secrets_file(
-        CLIENT_SECRET_FILE,
-        scopes=SCOPES,
-        redirect_uri=f"{os.environ.get('BASE_URL', 'http://localhost:8000')}/oauth2callback"
-    )
-    
-    # สร้าง auth URL
-    auth_url, _ = flow.authorization_url(
-        access_type='offline',
-        include_granted_scopes='true',
-        prompt='consent',
-        state=state
-    )
-    
-    # ทำการ redirect ไปยัง Google โดยตรง
-    return RedirectResponse(url=auth_url)
-
 @app.get("/oauth2callback")
-def oauth2callback(request: Request, state: str = Query(None), code: str = Query(None)):
-    # ตรวจสอบ state
-    if state not in state_tokens or state not in flow_configs:
-        raise HTTPException(status_code=400, detail="Invalid state parameter")
-    
-    user_email = state_tokens.pop(state)
-    client_config = flow_configs.pop(state)
-    
+def oauth2callback(code: str, state: Optional[str] = None):
+    """รับค่า authorization code จาก Google OAuth และแลกเป็น tokens"""
     try:
-        # สร้าง flow ใหม่ด้วย client_config เดิม
-        flow = Flow.from_client_config(
-            client_config,
-            scopes=SCOPES,
-            redirect_uri=f"{os.environ.get('BASE_URL', 'http://localhost:8000')}/oauth2callback"
-        )
+        flow = InstalledAppFlow.from_client_secrets_file(CLIENT_SECRET_FILE, SCOPES)
+        flow.redirect_uri = f"{os.environ.get('BASE_URL')}/oauth2callback"
         
-        # แลกโค้ดเป็น token
+        # แลก authorization code เป็น access token
         flow.fetch_token(code=code)
         
-        # บันทึก credentials
-        creds = flow.credentials
+        # ดึง email จาก state (ต้องส่ง email ใน state ตอนสร้าง auth URL)
+        user_email = state  # หรือใช้วิธีอื่นในการจัดเก็บและดึง email
+        
+        # บันทึก token
         token_path = os.path.join(TOKEN_DIR, f'token_{user_email}.json')
         with open(token_path, 'w') as token_file:
-            token_file.write(creds.to_json())
+            token_file.write(flow.credentials.to_json())
         
-        # สร้างหน้า HTML แสดงผลสำเร็จ
-        html_content = f"""
-        <!DOCTYPE html>
+        # แสดงหน้าแจ้งเตือนความสำเร็จ
+        return HTMLResponse("""
         <html>
-        <head>
-            <title>Authorization Successful</title>
-            <style>
-                body {{ font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; }}
-                .container {{ text-align: center; }}
-                .success {{ color: green; }}
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <h1 class="success">✓ Authorization Successful</h1>
-                <p>คุณได้อนุญาตให้แอปเข้าถึง Google Calendar สำหรับ {user_email} เรียบร้อยแล้ว</p>
-                <p>คุณสามารถปิดหน้านี้และกลับไปใช้งาน Line ได้</p>
-            </div>
-        </body>
+            <body>
+                <h1>การยืนยันตัวตนสำเร็จ!</h1>
+                <p>คุณสามารถปิดหน้านี้และกลับไปใช้งานแอปพลิเคชันได้</p>
+            </body>
         </html>
-        """
-        return HTMLResponse(content=html_content)
-        
+        """)
     except Exception as e:
-        return HTMLResponse(content=f"""
-        <!DOCTYPE html>
+        return HTMLResponse(f"""
         <html>
-        <head>
-            <title>Authorization Error</title>
-            <style>
-                body {{ font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; }}
-                .container {{ text-align: center; }}
-                .error {{ color: red; }}
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <h1 class="error">✗ Authorization Error</h1>
-                <p>เกิดข้อผิดพลาดในการยืนยันตัวตน: {str(e)}</p>
-                <p>กรุณาลองใหม่อีกครั้ง</p>
-            </div>
-        </body>
+            <body>
+                <h1>เกิดข้อผิดพลาดในการยืนยันตัวตน</h1>
+                <p>ข้อผิดพลาด: {str(e)}</p>
+            </body>
         </html>
         """)
 
@@ -358,21 +296,74 @@ def get_user_events(
     end_date: Optional[str] = None
 ):
     """ดึงข้อมูลกิจกรรมของผู้ใช้คนเดียว และยืนยันตัวตนหากจำเป็น"""
-    # ตรวจสอบว่ามี token และใช้งานได้หรือไม่
-    if not is_token_valid(user_email):
-        # ถ้าไม่มี token หรือ token ใช้งานไม่ได้ ให้ redirect ไปที่ /authorize โดยตรง
-        authorize_url = f"/authorize/{user_email}"
-        return RedirectResponse(url=authorize_url, status_code=303)
+    # ดึงข้อมูลและยืนยันตัวตนถ้าจำเป็น
+    creds_result = get_credentials(user_email)
     
-    # ดึงข้อมูลกิจกรรม
+    # ตรวจสอบว่าต้องการการยืนยันตัวตนหรือไม่
+    if isinstance(creds_result, dict) and creds_result.get("requires_auth"):
+        # return JSONResponse(content={
+        #     "email": user_email,
+        #     "is_authenticated": False,
+        #     "auth_required": True,
+        #     "auth_url": creds_result["auth_url"]
+        # })
+        return RedirectResponse(url=creds_result["auth_url"])
+    
+    # ถ้ามี credentials แล้ว ดึงข้อมูลปฏิทิน
     try:
-        result = get_calendar_events(user_email, calendar_id, start_date, end_date)
-        result['is_authenticated'] = True
-        return JSONResponse(content=result)
-    except HTTPException as e:
-        # ถ้าเกิด HTTP Exception (เช่น 401 จาก get_credentials)
-        authorize_url = f"/authorize/{user_email}"
-        return RedirectResponse(url=authorize_url, status_code=303)
+        service = build('calendar', 'v3', credentials=creds_result)
+        
+        # กำหนดช่วงเวลาในการดึงข้อมูล
+        time_min = start_date + "T00:00:00Z" if start_date else datetime.utcnow().isoformat() + "Z"
+        time_max = end_date + "T23:59:59Z" if end_date else (datetime.utcnow() + timedelta(days=7)).isoformat() + "Z"
+        
+        print(f"กำลังดึงข้อมูลสำหรับ {user_email} จาก {time_min} ถึง {time_max}")
+        
+        # ดึงข้อมูลกิจกรรม
+        events_result = service.events().list(
+            calendarId=calendar_id,
+            timeMin=time_min,
+            timeMax=time_max,
+            singleEvents=True,
+            orderBy='startTime'
+        ).execute()
+        
+        events = events_result.get('items', [])
+        print(f"พบ {len(events)} กิจกรรมสำหรับ {user_email}")
+        
+        # แปลงข้อมูลให้เหมาะสม
+        formatted_events = []
+        for event in events:
+            start = event['start'].get('dateTime', event['start'].get('date'))
+            end = event['end'].get('dateTime', event['end'].get('date'))
+            
+            formatted_events.append({
+                'id': event['id'],
+                'summary': event.get('summary', 'ไม่มีชื่อกิจกรรม'),
+                'start': start,
+                'end': end,
+                'creator': event.get('creator', {}),
+                'attendees': event.get('attendees', []),
+                'status': event.get('status', 'confirmed'),
+                'location': event.get('location', ''),
+                'description': event.get('description', '')
+            })
+        
+        return {
+            'email': user_email,
+            'calendar_id': calendar_id,
+            'events': formatted_events,
+            'is_authenticated': True
+        }
+    except Exception as e:
+        print(f"เกิดข้อผิดพลาดในการดึงข้อมูลสำหรับ {user_email}: {str(e)}")
+        return {
+            'email': user_email,
+            'calendar_id': calendar_id,
+            'events': [],
+            'error': str(e),
+            'is_authenticated': False
+        }
 
 @app.post("/events/multiple")
 def get_multiple_users_events(request: UsersRequest):
@@ -445,13 +436,11 @@ def get_multiple_users_events(request: UsersRequest):
         else:
             # ถ้ายังไม่มี token ที่ใช้งานได้
             users_without_auth.append(user.email)
-            authorize_url = f"/authorize/{user.email}"
             results.append({
                 'email': user.email,
                 'calendar_id': user.calendar_id,
                 'events': [],
-                'error': f'ผู้ใช้ยังไม่ได้ยืนยันตัวตน กรุณาใช้ {authorize_url} เพื่อยืนยันตัวตน',
-                'authorize_url': authorize_url,
+                'error': 'ผู้ใช้ยังไม่ได้ยืนยันตัวตน กรุณาใช้ /events/{email} ก่อน',
                 'is_authenticated': False
             })
     
@@ -460,7 +449,7 @@ def get_multiple_users_events(request: UsersRequest):
     
     if users_without_auth:
         response["users_without_auth"] = users_without_auth
-        response["message"] = f"ผู้ใช้ต่อไปนี้ยังไม่ได้ยืนยันตัวตน: {', '.join(users_without_auth)}"
+        response["message"] = f"ผู้ใช้ต่อไปนี้ยังไม่ได้ยืนยันตัวตน ใช้ /events/<email> เพื่อยืนยันตัวตน: {', '.join(users_without_auth)}"
     
     return JSONResponse(content=response)
 
@@ -486,23 +475,12 @@ def check_auth_status(user_email: str):
     else:
         token_info["has_token_file"] = False
     
-    # ถ้าไม่ได้ยืนยันตัวตน ให้ส่ง authorize_url
-    if not is_authenticated:
-        authorize_url = f"/authorize/{user_email}"
-        return {
-            "email": user_email,
-            "authenticated": is_authenticated,
-            "token_info": token_info,
-            "authorize_url": authorize_url,
-            "message": f"ผู้ใช้ยังไม่ได้ยืนยันตัวตน ใช้ {authorize_url} เพื่อยืนยันตัวตน"
-        }
-    else:
-        return {
-            "email": user_email,
-            "authenticated": is_authenticated,
-            "token_info": token_info,
-            "message": "ผู้ใช้ได้ยืนยันตัวตนแล้ว"
-        }
+    return {
+        "email": user_email,
+        "authenticated": is_authenticated,
+        "token_info": token_info,
+        "message": "ผู้ใช้ได้ยืนยันตัวตนแล้ว" if is_authenticated else "ผู้ใช้ยังไม่ได้ยืนยันตัวตน ใช้ /events/<email> เพื่อยืนยันตัวตน"
+    }
 
 @app.delete("/auth/revoke/{user_email}")
 def revoke_auth(user_email: str):
@@ -544,26 +522,23 @@ def get_bulk_events(
         start_date=start_date,
         end_date=end_date
     )
+    
+    # ใช้ฟังก์ชัน get_multiple_users_events
     return get_multiple_users_events(request)
-
 
 @app.post("/events/create-bulk")
 def create_bulk_events(event_request: BulkEventRequest):
     """สร้างการนัดหมายพร้อมกันสำหรับหลายผู้ใช้ โดยมีรายละเอียดเดียวกัน"""
     results = []
-    users_without_auth = []
     
     for user_email in event_request.user_emails:
         try:
             # ตรวจสอบว่าผู้ใช้ได้ยืนยันตัวตนแล้วหรือไม่
             if not is_token_valid(user_email):
-                authorize_url = f"/authorize/{user_email}"
-                users_without_auth.append(user_email)
                 results.append({
                     'email': user_email,
                     'success': False,
-                    'authorize_url': authorize_url,
-                    'message': f'ผู้ใช้ยังไม่ได้ยืนยันตัวตน กรุณาใช้ {authorize_url} เพื่อยืนยันตัวตน'
+                    'message': 'ผู้ใช้ยังไม่ได้ยืนยันตัวตน กรุณาใช้ /events/{email} ก่อน'
                 })
                 continue
                 
@@ -629,23 +604,14 @@ def create_bulk_events(event_request: BulkEventRequest):
                 'message': f'เกิดข้อผิดพลาด: {str(e)}'
             })
     
-    response = {
+    return {
         "message": f"ดำเนินการสร้างการนัดหมายสำหรับ {len(event_request.user_emails)} คน",
         "results": results
     }
-    
-    if users_without_auth:
-        response["users_without_auth"] = users_without_auth
-        response["message"] += f" มีผู้ใช้ {len(users_without_auth)} คนที่ยังไม่ได้ยืนยันตัวตน"
-    
-    return response
 
 if __name__ == "__main__":
-    import uvicorn
     port = int(os.environ.get("PORT", 8000))
     print(f"เริ่มต้น FastAPI บน port {port}...")
     print(f"เข้าถึง API documentation ได้ที่: http://localhost:{port}/docs")
-    base_url = os.environ.get('BASE_URL', f'http://localhost:{port}')
-    print(f"กำหนด BASE_URL สำหรับ OAuth2: {base_url}")
-    print(f"OAuth2 callback URL: {base_url}/oauth2callback")
+    print(f"กำหนด redirect URI สำหรับ OAuth2: {REDIRECT_URI} (port: {AUTH_PORT})")
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
