@@ -37,9 +37,9 @@ app.add_middleware(
 )
 
 # กำหนด scope การเข้าถึง Google Calendar
-SCOPES = ['https://www.googleapis.com/auth/calendar']
+SCOPES = ['https://www.googleapis.com/auth/calendar', 'https://www.googleapis.com/auth/userinfo.email', 'openid']
 #file เก็บข้อมูล client secret ของ OAuth
-CLIENT_SECRET_FILE = 'client_secret_452392817293-omce8fua8307hkuvlngpvpebvnot3qh1.apps.googleusercontent.com.json'
+CLIENT_SECRET_FILE = os.getenv("CLIENT_SECRET_FILE")
 TOKEN_DIR = 'tokens' # โฟลเดอร์เก็บไฟล์ token
 REDIRECT_URI = 'http://localhost:8080/'  # กำหนด redirect URI 
 AUTH_PORT = 8080  # พอร์ต redirect
@@ -252,41 +252,71 @@ async def webhook(request: Request):
     return JSONResponse(content={"status": "OK"})
 
 @app.get("/oauth2callback")
-def oauth2callback(code: str, state: Optional[str] = None):
-    """รับค่า authorization code จาก Google OAuth และแลกเป็น tokens"""
+def oauth2callback(code: str, state: str = None):
     try:
+        # state ควรเป็นอีเมลที่ผู้ใช้ระบุในตอนแรก
+        expected_email = state
+        
+        # สร้าง flow
         flow = InstalledAppFlow.from_client_secrets_file(CLIENT_SECRET_FILE, SCOPES)
-        flow.redirect_uri = f"{os.environ.get('BASE_URL')}/oauth2callback"
+        base_url = os.environ.get('BASE_URL')
+        flow.redirect_uri = f"{base_url}/oauth2callback"
         
-        # แลก authorization code เป็น access token
+        # แลก code เป็น token
         flow.fetch_token(code=code)
+        credentials = flow.credentials
         
-        # ดึง email จาก state (ต้องส่ง email ใน state ตอนสร้าง auth URL)
-        user_email = state  # หรือใช้วิธีอื่นในการจัดเก็บและดึง email
+        # สร้าง service
+        service = build('calendar', 'v3', credentials=credentials)
+        
+        # ดึงข้อมูลปฏิทินเพื่อดูว่าได้รับอนุญาตจากอีเมลอะไร
+        calendar = service.calendars().get(calendarId='primary').execute()
+        actual_email = calendar.get('id')  # อีเมลของผู้ใช้ที่ใช้ยืนยันตัวตน
+        
+        # ตรวจสอบว่าอีเมลตรงกันหรือไม่
+        if actual_email.lower() != expected_email.lower():
+            return HTMLResponse(f"""
+            <html>
+                <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+                    <h1 style="color: #d9534f;">เกิดข้อผิดพลาดในการยืนยันตัวตน</h1>
+                    <div style="background-color: #f8d7da; border: 1px solid #f5c6cb; border-radius: 4px; padding: 15px; margin-bottom: 20px;">
+                        <p><strong>อีเมลที่คุณใช้ยืนยันตัวตนไม่ถูกต้อง!</strong></p>
+                        <p>คุณกรอกอีเมล <strong>{expected_email}</strong> แต่ยืนยันตัวตนด้วย <strong>{actual_email}</strong></p>
+                        <p>กรุณาลองใหม่โดยใช้อีเมลที่ตรงกัน</p>
+                    </div>
+                    <a href="/events/{expected_email}" style="background-color: #007bff; color: white; padding: 10px 15px; text-decoration: none; border-radius: 4px;">ลองใหม่</a>
+                </body>
+            </html>
+            """, status_code=400)
         
         # บันทึก token
-        token_path = os.path.join(TOKEN_DIR, f'token_{user_email}.json')
+        token_path = os.path.join(TOKEN_DIR, f'token_{actual_email}.json')
         with open(token_path, 'w') as token_file:
-            token_file.write(flow.credentials.to_json())
+            token_file.write(credentials.to_json())
         
-        # แสดงหน้าแจ้งเตือนความสำเร็จ
         return HTMLResponse("""
         <html>
-            <body>
-                <h1>การยืนยันตัวตนสำเร็จ!</h1>
-                <p>คุณสามารถปิดหน้านี้และกลับไปใช้งานแอปพลิเคชันได้</p>
+            <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+                <h1 style="color: #28a745;">การยืนยันตัวตนสำเร็จ!</h1>
+                <div style="background-color: #d4edda; border: 1px solid #c3e6cb; border-radius: 4px; padding: 15px; margin-bottom: 20px;">
+                    <p>คุณได้ยืนยันตัวตนเรียบร้อยแล้ว</p>
+                    <p>คุณสามารถปิดหน้านี้และกลับไปใช้งานแอปพลิเคชันได้</p>
+                </div>
             </body>
         </html>
         """)
+        
     except Exception as e:
         return HTMLResponse(f"""
         <html>
-            <body>
-                <h1>เกิดข้อผิดพลาดในการยืนยันตัวตน</h1>
-                <p>ข้อผิดพลาด: {str(e)}</p>
+            <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+                <h1 style="color: #d9534f;">เกิดข้อผิดพลาดในการยืนยันตัวตน</h1>
+                <div style="background-color: #f8d7da; border: 1px solid #f5c6cb; border-radius: 4px; padding: 15px;">
+                    <p>ข้อผิดพลาด: {str(e)}</p>
+                </div>
             </body>
         </html>
-        """)
+        """, status_code=500)
 
 @app.get("/events/{user_email}")
 def get_user_events(
@@ -608,6 +638,50 @@ def create_bulk_events(event_request: BulkEventRequest):
         "message": f"ดำเนินการสร้างการนัดหมายสำหรับ {len(event_request.user_emails)} คน",
         "results": results
     }
+
+@app.get("/users/list")
+def list_registered_users():
+    """ดึงรายการอีเมลผู้ใช้ทั้งหมดที่ได้ลงทะเบียนในระบบ"""
+    try:
+        # ตรวจสอบไฟลเดอร์ TOKEN_DIR ว่ามีหรือไม่
+        if not os.path.exists(TOKEN_DIR):
+            return {"users": [], "message": "ยังไม่มีผู้ใช้ลงทะเบียนในระบบ"}
+        
+        # หาไฟล์ token ทั้งหมด
+        token_files = []
+        for filename in os.listdir(TOKEN_DIR):
+            # เลือกเฉพาะไฟล์ที่เริ่มต้นด้วย token_ และลงท้ายด้วย .json
+            if filename.startswith('token_') and filename.endswith('.json'):
+                token_files.append(filename)
+        
+        # ดึงอีเมลจากชื่อไฟล์
+        emails = []
+        for file in token_files:
+            # ตัด "token_" ออกจากด้านหน้า
+            email_with_extension = file[6:]  # ตัด "token_" ออก
+            # ตัด ".json" ออกจากด้านหลัง
+            email = email_with_extension[:-5]  # ตัด ".json" ออก
+            
+            # ตรวจสอบว่า token ยังใช้งานได้
+            if is_token_valid(email):
+                emails.append(email)
+        
+        # เรียงลำดับอีเมลตามตัวอักษร
+        emails.sort()
+        
+        return {
+            "total_users": len(emails),
+            "users": emails,
+            "message": f"พบผู้ใช้ที่ลงทะเบียนทั้งหมด {len(emails)} คน"
+        }
+        
+    except Exception as e:
+        return {
+            "total_users": 0,
+            "users": [],
+            "error": str(e),
+            "message": "เกิดข้อผิดพลาดในการดึงรายการผู้ใช้"
+        }
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
