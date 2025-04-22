@@ -18,9 +18,10 @@ from linebot.models import (
 
 import requests
 
-from test import send_post
+from test import send_post, get_available_users
 
 load_dotenv()
+
 
 # LINE API configuration
 CHANNEL_ACCESS_TOKEN = os.getenv("CHANNEL_ACCESS_TOKEN")
@@ -52,9 +53,6 @@ user_schedules = {
         ]
     }
 }
-
-# Mock user data (in production, fetch from database)
-available_users = ["panupongpr3841@gmail.com", "panupongnu4@gmail.com"]
 
 # Model for meeting creation result
 class MeetingResult(BaseModel):
@@ -219,9 +217,12 @@ def create_calendar_flex_message(user_id):
 
 def create_user_selection_flex_message(user_id):
     """Create a user selection flex message."""
+    # available_users = ['0827703801p@gmail.com', 'khunnapatt65@gmail.com', 'pemadee2546@gmail.com']
+    available_users = get_available_users()
     items = []
     
     for i, email in enumerate(available_users):
+
         items.append({
             "type": "box",
             "layout": "vertical",

@@ -13,12 +13,12 @@ from google.auth.transport.requests import Request as GoogleRequest
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
+import pandas as pd
 from pydantic import BaseModel
 import uvicorn
 
 # Local application
 from lineChatbot import *
-
 
 # โหลดตัวแปรสภาพแวดล้อม
 load_dotenv()
@@ -81,6 +81,30 @@ class BulkEventRequest(BaseModel):
     start_time: str  # รูปแบบ ISO format เช่น "2025-04-20T09:00:00+07:00"
     end_time: str    # รูปแบบ ISO format เช่น "2025-04-20T10:00:00+07:00"
     attendees: Optional[List[str]] = None  # รายชื่ออีเมลของผู้เข้าร่วมเพิ่มเติม (จะถูกเพิ่มในทุกปฏิทิน)
+
+# โมเดลสำหรับรับข้อมูลผู้ใช้หลายคน จากข้อมูลใน excel
+class ManagerRecruiter(BaseModel):
+    file_path: Optional[str] = None
+    location: str
+    english_min: float
+    exp_kind: str
+    age_key: str
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+
+# โมเดลสำหรับรับข้อมูล Manger Recruiter
+class getManagerRecruiter(BaseModel):
+    location: str 
+    english_min: int
+    exp_kind: str
+    age_key: str
+    
+# โมเดลสำหรับรับข้อมูล Manger Recruiter แบบกลุ่ม
+class combMangerRecruiter(BaseModel):
+    users: List[getManagerRecruiter] #List ของ UserCalendar
+   
+
+
 
 def is_token_valid(user_email: str) -> bool:
     """ตรวจสอบว่า token ของผู้ใช้ยังใช้งานได้หรือไม่"""
@@ -236,6 +260,150 @@ def get_calendar_events(user_email: str, calendar_id: str, start_date: str, end_
             'error': str(e),
             'auth_status': 'error'
         }
+
+def add_location_column(df):
+    """
+    เติมคอลัมน์ Location ให้กับตาราง (df)
+    โดยอาศัยแถวตัวคั่นที่ช่อง Email เป็น NaN
+    """
+    curr_loc = None          # เก็บ location ปัจจุบัน
+    loc_list = []            # จะกลายเป็นคอลัมน์ใหม่
+
+    for _, row in df.iterrows():
+        if pd.isna(row['Email']):        # แถวตัวคั่น (ไม่มีอีเมล)
+            curr_loc = row['Name']       # อัปเดต location
+        loc_list.append(curr_loc)        # เติม loc ของแถวนั้น
+
+    df['Location'] = loc_list
+    return df
+
+def get_people(file_path,
+               location=None,
+               english_min=None,
+               exp_kind=None,
+               age_key=None):
+    """
+    อ่านไฟล์ Excel แล้วกรองข้อมูลตามเงื่อนไข
+    พร้อมคืนชื่อ‑อีเมล‑สถานที่ ของชีต M และ R
+    """
+
+    # ---------- 1) โหลดทุกชีต ----------
+    sheets = pd.read_excel(file_path, sheet_name=None)
+    df_M = sheets['M'].copy()
+    df_R = sheets['R'].copy()
+
+    # ---------- 2) เปลี่ยนชื่อคอลัมน์แรกเป็น Name ----------
+    df_M.rename(columns={df_M.columns[0]: 'Name'}, inplace=True)
+    df_R.rename(columns={df_R.columns[0]: 'Name'}, inplace=True)
+
+    # ---------- 3) เติมคอลัมน์ Location ----------
+    df_M = add_location_column(df_M)
+    df_R = add_location_column(df_R)
+
+    # ---------- 4) ตัดแถวตัวคั่น (Email เป็น NaN) ----------
+    df_M = df_M[df_M['Email'].notna()].reset_index(drop=True)
+    df_R = df_R[df_R['Email'].notna()].reset_index(drop=True)
+
+    # ---------- 5) กรองตาม Location ----------
+    if location:
+        df_M = df_M[df_M['Location'].str.contains(location, case=False, na=False)]
+        df_R = df_R[df_R['Location'].str.contains(location, case=False, na=False)]
+
+    # ---------- 6) กรอง English ----------
+    if english_min is not None and 'English' in df_M.columns:
+        df_M['Eng_num'] = pd.to_numeric(df_M['English'], errors='coerce')
+        df_M = df_M[df_M['Eng_num'] >= english_min]
+
+    # ---------- 7) กรอง Experience ----------
+    if exp_kind and 'Experience' in df_M.columns:
+        exp_low = df_M['Experience'].str.lower()
+        if exp_kind.lower() == 'strong':
+            cond = exp_low.str.contains('strong', na=False) & \
+                   ~exp_low.str.contains('non', na=False)
+            df_M = df_M[cond]
+        else:
+            df_M = df_M[exp_low.str.contains(exp_kind.lower(), na=False)]
+
+    # ---------- 8) กรอง Age ----------
+    if age_key and 'Age' in df_M.columns:
+        df_M = df_M[df_M['Age'].str.contains(age_key, case=False, na=False)]
+
+    # ---------- 9) เตรียมผลลัพธ์ (dict → list ของ dict) ----------
+    list_M = (
+        df_M[['Name', 'Email', 'Location']]
+        .to_dict(orient='records')
+    )
+    list_R = (
+        df_R[['Name', 'Email', 'Location']]
+        .to_dict(orient='records')
+    )
+
+    return {'M': list_M, 'R': list_R}
+
+def get_email(file_path,
+               location=None,
+               english_min=None,
+               exp_kind=None,
+               age_key=None):
+    """
+    อ่านไฟล์ Excel แล้วกรองข้อมูลตามเงื่อนไข
+    คืนข้อมูลในรูปแบบ list ของ dict ที่มีแค่ email
+    """
+
+    # ---------- 1) โหลดทุกชีต ----------
+    sheets = pd.read_excel(file_path, sheet_name=None)
+    df_M = sheets['M'].copy()
+    df_R = sheets['R'].copy()
+
+    # ---------- 2) เปลี่ยนชื่อคอลัมน์แรกเป็น Name ----------
+    df_M.rename(columns={df_M.columns[0]: 'Name'}, inplace=True)
+    df_R.rename(columns={df_R.columns[0]: 'Name'}, inplace=True)
+
+    # ---------- 3) เติมคอลัมน์ Location ----------
+    df_M = add_location_column(df_M)
+    df_R = add_location_column(df_R)
+
+    # ---------- 4) ตัดแถวตัวคั่น (Email เป็น NaN) ----------
+    df_M = df_M[df_M['Email'].notna()].reset_index(drop=True)
+    df_R = df_R[df_R['Email'].notna()].reset_index(drop=True)
+
+    # ---------- 5) กรองตาม Location ----------
+    if location:
+        df_M = df_M[df_M['Location'].str.contains(location, case=False, na=False)]
+        df_R = df_R[df_R['Location'].str.contains(location, case=False, na=False)]
+
+    # ---------- 6) กรอง English ----------
+    if english_min is not None and 'English' in df_M.columns:
+        df_M['Eng_num'] = pd.to_numeric(df_M['English'], errors='coerce')
+        df_M = df_M[df_M['Eng_num'] >= english_min]
+
+    # ---------- 7) กรอง Experience ----------
+    if exp_kind and 'Experience' in df_M.columns:
+        exp_low = df_M['Experience'].str.lower()
+        if exp_kind.lower() == 'strong':
+            cond = exp_low.str.contains('strong', na=False) & \
+                   ~exp_low.str.contains('non', na=False)
+            df_M = df_M[cond]
+        else:
+            df_M = df_M[exp_low.str.contains(exp_kind.lower(), na=False)]
+
+    # ---------- 8) กรอง Age ----------
+    if age_key and 'Age' in df_M.columns:
+        df_M = df_M[df_M['Age'].str.contains(age_key, case=False, na=False)]
+
+    # ---------- 9) สร้าง list ของ dict ในรูปแบบที่ต้องการ ----------
+    result = []
+    
+    # เพิ่มอีเมลจาก M list
+    for _, row in df_M.iterrows():
+        result.append({"email": row['Email']})
+    
+    # เพิ่มอีเมลจาก R list
+    for _, row in df_R.iterrows():
+        result.append({"email": row['Email']})
+    
+    return result
+
 
 @app.get("/")
 def read_root():
@@ -489,6 +657,107 @@ def get_multiple_users_events(request: UsersRequest):
     
     return JSONResponse(content=response)
 
+@app.post("/events/multipleMR")
+def get_multiple_users_events(request: ManagerRecruiter):
+    """ดึงข้อมูลกิจกรรมของผู้ใช้หลายคน (เฉพาะผู้ใช้ที่ยืนยันตัวตนแล้ว)"""
+    results = []
+    users_without_auth = []
+    
+    # ใช้ฟังก์ชัน get_email เพื่อรับรายชื่ออีเมลผู้ใช้
+    users_list = get_email(
+        file_path='TESTt.xlsx',
+        location=request.location,
+        english_min=request.english_min,
+        exp_kind=request.exp_kind,
+        age_key=request.age_key
+    )
+    
+    # ตรวจสอบผู้ใช้แต่ละคนว่าได้ยืนยันตัวตนแล้วหรือไม่
+    for user_info in users_list:
+        email = user_info["email"]
+        # ใช้อีเมลเป็น calendar_id ถ้าไม่มีการระบุเพิ่มเติม
+        calendar_id = email
+        
+        if is_token_valid(email):
+            # ถ้ามี token ที่ใช้งานได้แล้ว ดึงข้อมูลปฏิทิน
+            try:
+                with open(os.path.join(TOKEN_DIR, f'token_{email}.json'), 'r') as token_file:
+                    token_data = json.load(token_file)
+                creds = Credentials.from_authorized_user_info(token_data, SCOPES)
+                
+                service = build('calendar', 'v3', credentials=creds)
+                
+                # กำหนดช่วงเวลาในการดึงข้อมูล
+                time_min = request.start_date + "T00:00:00Z" if request.start_date else datetime.utcnow().isoformat() + "Z"
+                time_max = request.end_date + "T23:59:59Z" if request.end_date else (datetime.utcnow() + timedelta(days=7)).isoformat() + "Z"
+                
+                print(f"กำลังดึงข้อมูลสำหรับ {email} จาก {time_min} ถึง {time_max}")
+                
+                # ดึงข้อมูลกิจกรรม
+                events_result = service.events().list(
+                    calendarId=calendar_id,
+                    timeMin=time_min,
+                    timeMax=time_max,
+                    singleEvents=True,
+                    orderBy='startTime'
+                ).execute()
+                
+                events = events_result.get('items', [])
+                print(f"พบ {len(events)} กิจกรรมสำหรับ {email}")
+                
+                # แปลงข้อมูลให้เหมาะสม
+                formatted_events = []
+                for event in events:
+                    start = event['start'].get('dateTime', event['start'].get('date'))
+                    end = event['end'].get('dateTime', event['end'].get('date'))
+                    
+                    formatted_events.append({
+                        'id': event['id'],
+                        'summary': event.get('summary', 'ไม่มีชื่อกิจกรรม'),
+                        'start': start,
+                        'end': end,
+                        'creator': event.get('creator', {}),
+                        'attendees': event.get('attendees', []),
+                        'status': event.get('status', 'confirmed'),
+                        'location': event.get('location', ''),
+                        'description': event.get('description', '')
+                    })
+                
+                results.append({
+                    'email': email,
+                    'calendar_id': calendar_id,
+                    'events': formatted_events,
+                    'is_authenticated': True
+                })
+            except Exception as e:
+                print(f"เกิดข้อผิดพลาดในการดึงข้อมูลสำหรับ {email}: {str(e)}")
+                results.append({
+                    'email': email,
+                    'calendar_id': calendar_id,
+                    'events': [],
+                    'error': str(e),
+                    'is_authenticated': True
+                })
+        else:
+            # ถ้ายังไม่มี token ที่ใช้งานได้
+            users_without_auth.append(email)
+            results.append({
+                'email': email,
+                'calendar_id': calendar_id,
+                'events': [],
+                'error': 'ผู้ใช้ยังไม่ได้ยืนยันตัวตน กรุณาใช้ /events/{email} ก่อน',
+                'is_authenticated': False
+            })
+    
+    # สร้าง response
+    response = {"results": results}
+    
+    if users_without_auth:
+        response["users_without_auth"] = users_without_auth
+        response["message"] = f"ผู้ใช้ต่อไปนี้ยังไม่ได้ยืนยันตัวตน ใช้ /events/<email> เพื่อยืนยันตัวตน: {', '.join(users_without_auth)}"
+    
+    return JSONResponse(content=response)
+
 @app.get("/auth/status/{user_email}")
 def check_auth_status(user_email: str):
     """ตรวจสอบสถานะการยืนยันตัวตนของผู้ใช้"""
@@ -668,17 +937,15 @@ def list_registered_users():
             # ตัด ".json" ออกจากด้านหลัง
             email = email_with_extension[:-5]  # ตัด ".json" ออก
             
-            # ตรวจสอบว่า token ยังใช้งานได้
-            if is_token_valid(email):
-                emails.append(email)
+            # # ตรวจสอบว่า token ยังใช้งานได้
+            # if is_token_valid(email): 
+            #     emails.append(email)
         
         # เรียงลำดับอีเมลตามตัวอักษร
         emails.sort()
         
         return {
-            "total_users": len(emails),
             "users": emails,
-            "message": f"พบผู้ใช้ที่ลงทะเบียนทั้งหมด {len(emails)} คน"
         }
         
     except Exception as e:
@@ -688,6 +955,28 @@ def list_registered_users():
             "error": str(e),
             "message": "เกิดข้อผิดพลาดในการดึงรายการผู้ใช้"
         }
+
+@app.post("/getManagerRecruiter")
+def get_multiple_users_events(body: getManagerRecruiter):
+    try:
+        people = get_people(
+            file_path='TESTt.xlsx',          
+            location=body.location,
+            english_min=body.english_min,
+            exp_kind=body.exp_kind,
+            age_key=body.age_key
+        )
+        return {
+            # "request": body.model_dump(),   
+            "people":  people               
+        }
+
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
