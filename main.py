@@ -1,7 +1,6 @@
 # Standard library
 import json
 import os
-import shutil
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Union
 # Third-party libraries
@@ -16,7 +15,7 @@ from googleapiclient.discovery import build
 import pandas as pd
 from pydantic import BaseModel
 import uvicorn
-
+from linebot.exceptions import InvalidSignatureError
 # Local application
 from lineChatbot import *
 
@@ -813,23 +812,23 @@ def revoke_auth(user_email: str):
             "message": f"ไม่พบข้อมูลการยืนยันตัวตนสำหรับ {user_email}"
         }
 
-@app.post("/events/bulk")
-def get_bulk_events(
-    emails: List[str] = Query(..., description="รายการอีเมลของผู้ใช้"),
-    calendar_id: str = "primary",
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None
-):
-    """ดึงข้อมูลกิจกรรมของผู้ใช้หลายคนโดยใช้ query parameters (เฉพาะผู้ใช้ที่ยืนยันตัวตนแล้ว)"""
-    # สร้าง UsersRequest เพื่อใช้ฟังก์ชันที่มีอยู่แล้ว
-    request = UsersRequest(
-        users=[UserCalendar(email=email, calendar_id=calendar_id) for email in emails],
-        start_date=start_date,
-        end_date=end_date
-    )
+# @app.post("/events/bulk")
+# def get_bulk_events(
+#     emails: List[str] = Query(..., description="รายการอีเมลของผู้ใช้"),
+#     calendar_id: str = "primary",
+#     start_date: Optional[str] = None,
+#     end_date: Optional[str] = None
+# ):
+#     """ดึงข้อมูลกิจกรรมของผู้ใช้หลายคนโดยใช้ query parameters (เฉพาะผู้ใช้ที่ยืนยันตัวตนแล้ว)"""
+#     # สร้าง UsersRequest เพื่อใช้ฟังก์ชันที่มีอยู่แล้ว
+#     request = UsersRequest(
+#         users=[UserCalendar(email=email, calendar_id=calendar_id) for email in emails],
+#         start_date=start_date,
+#         end_date=end_date
+#     )
     
-    # ใช้ฟังก์ชัน get_multiple_users_events
-    return get_multiple_users_events(request)
+#     # ใช้ฟังก์ชัน get_multiple_users_events
+#     return get_multiple_users_events(request)
 
 @app.post("/events/create-bulk")
 def create_bulk_events(event_request: BulkEventRequest):
@@ -939,7 +938,7 @@ def list_registered_users():
             
             # # ตรวจสอบว่า token ยังใช้งานได้
             # if is_token_valid(email): 
-            #     emails.append(email)
+            emails.append(email)
         
         # เรียงลำดับอีเมลตามตัวอักษร
         emails.sort()
@@ -975,12 +974,11 @@ def get_multiple_users_events(body: getManagerRecruiter):
         raise HTTPException(status_code=500, detail=str(exc))
 
 
-
-
-
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     print(f"เริ่มต้น FastAPI บน port {port}...")
     print(f"เข้าถึง API documentation ได้ที่: http://localhost:{port}/docs")
     print(f"กำหนด redirect URI สำหรับ OAuth2: {REDIRECT_URI} (port: {AUTH_PORT})")
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
+    # venv\Scripts\activate
+    # uvicorn main:app --host 0.0.0.0 --port 8000 --reload
