@@ -1,7 +1,7 @@
 # Standard library
 import json
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta, timezone
 from typing import Any, Dict, List, Optional, Union
 # Third-party libraries
 from dotenv import load_dotenv
@@ -47,6 +47,7 @@ CLIENT_SECRET_FILE = os.getenv("CLIENT_SECRET_FILE")
 TOKEN_DIR = 'tokens' # โฟลเดอร์เก็บไฟล์ token
 REDIRECT_URI = 'http://localhost:8080/'  # กำหนด redirect URI 
 AUTH_PORT = 8080  # พอร์ต redirect
+FILE_PATH = os.getenv("FILE_PATH")
 
 # ลบและสร้างโฟลเดอร์ tokens ใหม่เพื่อหลีกเลี่ยงปัญหา
 try:
@@ -403,6 +404,39 @@ def get_email(file_path,
     
     return result
 
+def is_available(events, start_time, end_time):
+    """
+    ตรวจสอบว่าช่วงเวลาที่กำหนดว่างหรือไม่
+    """
+    for event in events:
+        event_start = parse_event_time(event['start'].get('dateTime', event['start'].get('date')))
+        event_end = parse_event_time(event['end'].get('dateTime', event['end'].get('date')))
+        
+        # ถ้ามีเวลาที่ทับซ้อนกัน ถือว่าไม่ว่าง
+        if (start_time < event_end and end_time > event_start):
+            return False
+    
+    return True
+
+def parse_event_time(time_str):
+    """
+    แปลงเวลาจาก string เป็น datetime object
+    """
+    if 'T' in time_str:
+        # กรณีมีข้อมูลเวลา (dateTime)
+        if time_str.endswith('Z'):
+            return datetime.fromisoformat(time_str.replace('Z', '+00:00'))
+        else:
+            return datetime.fromisoformat(time_str)
+    else:
+        # กรณีมีแต่วันที่ (date)
+        dt = datetime.strptime(time_str, '%Y-%m-%d')
+        return dt.replace(tzinfo=timezone.utc)
+
+
+
+
+
 
 @app.get("/")
 def read_root():
@@ -658,22 +692,26 @@ def get_multiple_users_events(request: UsersRequest):
 
 @app.post("/events/multipleMR")
 def get_multiple_users_events(request: ManagerRecruiter):
-    """ดึงข้อมูลกิจกรรมของผู้ใช้หลายคน (เฉพาะผู้ใช้ที่ยืนยันตัวตนแล้ว)"""
-    results = []
-    users_without_auth = []
+    """ดึงข้อมูลกิจกรรมของผู้ใช้หลายคน (เฉพาะผู้ใช้ที่ยืนยันตัวตนแล้ว) แยกตามประเภท M และ R"""
+    results_m = []
+    results_r = []
+    users_without_auth_m = []
+    users_without_auth_r = []
     
-    # ใช้ฟังก์ชัน get_email เพื่อรับรายชื่ออีเมลผู้ใช้
-    users_list = get_email(
-        file_path='TESTt.xlsx',
+    # ใช้ฟังก์ชัน get_people เพื่อรับรายชื่ออีเมลผู้ใช้แยกตามประเภท M และ R
+    users_dict = get_people(
+        file_path=str(FILE_PATH),
         location=request.location,
         english_min=request.english_min,
         exp_kind=request.exp_kind,
         age_key=request.age_key
     )
     
-    # ตรวจสอบผู้ใช้แต่ละคนว่าได้ยืนยันตัวตนแล้วหรือไม่
-    for user_info in users_list:
-        email = user_info["email"]
+    # ประมวลผลสำหรับผู้ใช้ประเภท M
+    for user_info in users_dict['M']:
+        email = user_info["Email"]
+        name = user_info["Name"]
+        location = user_info["Location"]
         # ใช้อีเมลเป็น calendar_id ถ้าไม่มีการระบุเพิ่มเติม
         calendar_id = email
         
@@ -690,7 +728,7 @@ def get_multiple_users_events(request: ManagerRecruiter):
                 time_min = request.start_date + "T00:00:00Z" if request.start_date else datetime.utcnow().isoformat() + "Z"
                 time_max = request.end_date + "T23:59:59Z" if request.end_date else (datetime.utcnow() + timedelta(days=7)).isoformat() + "Z"
                 
-                print(f"กำลังดึงข้อมูลสำหรับ {email} จาก {time_min} ถึง {time_max}")
+                print(f"กำลังดึงข้อมูลสำหรับ M: {email} ({name}) จาก {time_min} ถึง {time_max}")
                 
                 # ดึงข้อมูลกิจกรรม
                 events_result = service.events().list(
@@ -702,7 +740,7 @@ def get_multiple_users_events(request: ManagerRecruiter):
                 ).execute()
                 
                 events = events_result.get('items', [])
-                print(f"พบ {len(events)} กิจกรรมสำหรับ {email}")
+                print(f"พบ {len(events)} กิจกรรมสำหรับ M: {email}")
                 
                 # แปลงข้อมูลให้เหมาะสม
                 formatted_events = []
@@ -722,38 +760,145 @@ def get_multiple_users_events(request: ManagerRecruiter):
                         'description': event.get('description', '')
                     })
                 
-                results.append({
+                results_m.append({
                     'email': email,
+                    'name': name,
+                    'location': location,
                     'calendar_id': calendar_id,
                     'events': formatted_events,
-                    'is_authenticated': True
+                    'is_authenticated': True,
+                    'type': 'M'
                 })
             except Exception as e:
-                print(f"เกิดข้อผิดพลาดในการดึงข้อมูลสำหรับ {email}: {str(e)}")
-                results.append({
+                print(f"เกิดข้อผิดพลาดในการดึงข้อมูลสำหรับ M: {email}: {str(e)}")
+                results_m.append({
                     'email': email,
+                    'name': name,
+                    'location': location,
                     'calendar_id': calendar_id,
                     'events': [],
                     'error': str(e),
-                    'is_authenticated': True
+                    'is_authenticated': True,
+                    'type': 'M'
                 })
         else:
             # ถ้ายังไม่มี token ที่ใช้งานได้
-            users_without_auth.append(email)
-            results.append({
+            users_without_auth_m.append(email)
+            results_m.append({
                 'email': email,
+                'name': name,
+                'location': location,
                 'calendar_id': calendar_id,
                 'events': [],
                 'error': 'ผู้ใช้ยังไม่ได้ยืนยันตัวตน กรุณาใช้ /events/{email} ก่อน',
-                'is_authenticated': False
+                'is_authenticated': False,
+                'type': 'M'
+            })
+    
+    # ประมวลผลสำหรับผู้ใช้ประเภท R
+    for user_info in users_dict['R']:
+        email = user_info["Email"]
+        name = user_info["Name"]
+        location = user_info["Location"]
+        # ใช้อีเมลเป็น calendar_id ถ้าไม่มีการระบุเพิ่มเติม
+        calendar_id = email
+        
+        if is_token_valid(email):
+            # ถ้ามี token ที่ใช้งานได้แล้ว ดึงข้อมูลปฏิทิน
+            try:
+                with open(os.path.join(TOKEN_DIR, f'token_{email}.json'), 'r') as token_file:
+                    token_data = json.load(token_file)
+                creds = Credentials.from_authorized_user_info(token_data, SCOPES)
+                
+                service = build('calendar', 'v3', credentials=creds)
+                
+                # กำหนดช่วงเวลาในการดึงข้อมูล
+                time_min = request.start_date + "T00:00:00Z" if request.start_date else datetime.utcnow().isoformat() + "Z"
+                time_max = request.end_date + "T23:59:59Z" if request.end_date else (datetime.utcnow() + timedelta(days=7)).isoformat() + "Z"
+                
+                print(f"กำลังดึงข้อมูลสำหรับ R: {email} ({name}) จาก {time_min} ถึง {time_max}")
+                
+                # ดึงข้อมูลกิจกรรม
+                events_result = service.events().list(
+                    calendarId=calendar_id,
+                    timeMin=time_min,
+                    timeMax=time_max,
+                    singleEvents=True,
+                    orderBy='startTime'
+                ).execute()
+                
+                events = events_result.get('items', [])
+                print(f"พบ {len(events)} กิจกรรมสำหรับ R: {email}")
+                
+                # แปลงข้อมูลให้เหมาะสม
+                formatted_events = []
+                for event in events:
+                    start = event['start'].get('dateTime', event['start'].get('date'))
+                    end = event['end'].get('dateTime', event['end'].get('date'))
+                    
+                    formatted_events.append({
+                        'id': event['id'],
+                        'summary': event.get('summary', 'ไม่มีชื่อกิจกรรม'),
+                        'start': start,
+                        'end': end,
+                        'creator': event.get('creator', {}),
+                        'attendees': event.get('attendees', []),
+                        'status': event.get('status', 'confirmed'),
+                        'location': event.get('location', ''),
+                        'description': event.get('description', '')
+                    })
+                
+                results_r.append({
+                    'email': email,
+                    'name': name,
+                    'location': location,
+                    'calendar_id': calendar_id,
+                    'events': formatted_events,
+                    'is_authenticated': True,
+                    'type': 'R'
+                })
+            except Exception as e:
+                print(f"เกิดข้อผิดพลาดในการดึงข้อมูลสำหรับ R: {email}: {str(e)}")
+                results_r.append({
+                    'email': email,
+                    'name': name,
+                    'location': location,
+                    'calendar_id': calendar_id,
+                    'events': [],
+                    'error': str(e),
+                    'is_authenticated': True,
+                    'type': 'R'
+                })
+        else:
+            # ถ้ายังไม่มี token ที่ใช้งานได้
+            users_without_auth_r.append(email)
+            results_r.append({
+                'email': email,
+                'name': name,
+                'location': location,
+                'calendar_id': calendar_id,
+                'events': [],
+                'error': 'ผู้ใช้ยังไม่ได้ยืนยันตัวตน กรุณาใช้ /events/{email} ก่อน',
+                'is_authenticated': False,
+                'type': 'R'
             })
     
     # สร้าง response
-    response = {"results": results}
+    response = {
+        "manager": results_m,
+        "recruiter": results_r
+    }
     
-    if users_without_auth:
-        response["users_without_auth"] = users_without_auth
-        response["message"] = f"ผู้ใช้ต่อไปนี้ยังไม่ได้ยืนยันตัวตน ใช้ /events/<email> เพื่อยืนยันตัวตน: {', '.join(users_without_auth)}"
+    # ข้อความแจ้งเตือนผู้ใช้ที่ยังไม่ได้ยืนยันตัวตน
+    if users_without_auth_m:
+        response["users_without_auth_manager"] = users_without_auth_m
+    
+    if users_without_auth_r:
+        response["users_without_auth_recruiter"] = users_without_auth_r
+    
+    if users_without_auth_m or users_without_auth_r:
+        all_without_auth = users_without_auth_m + users_without_auth_r
+        response["message"] = f"ผู้ใช้ต่อไปนี้ยังไม่ได้ยืนยันตัวตน ใช้ /events/<email> เพื่อยืนยันตัวตน: {', '.join(all_without_auth)}"
     
     return JSONResponse(content=response)
 
@@ -811,24 +956,6 @@ def revoke_auth(user_email: str):
             "success": False,
             "message": f"ไม่พบข้อมูลการยืนยันตัวตนสำหรับ {user_email}"
         }
-
-# @app.post("/events/bulk")
-# def get_bulk_events(
-#     emails: List[str] = Query(..., description="รายการอีเมลของผู้ใช้"),
-#     calendar_id: str = "primary",
-#     start_date: Optional[str] = None,
-#     end_date: Optional[str] = None
-# ):
-#     """ดึงข้อมูลกิจกรรมของผู้ใช้หลายคนโดยใช้ query parameters (เฉพาะผู้ใช้ที่ยืนยันตัวตนแล้ว)"""
-#     # สร้าง UsersRequest เพื่อใช้ฟังก์ชันที่มีอยู่แล้ว
-#     request = UsersRequest(
-#         users=[UserCalendar(email=email, calendar_id=calendar_id) for email in emails],
-#         start_date=start_date,
-#         end_date=end_date
-#     )
-    
-#     # ใช้ฟังก์ชัน get_multiple_users_events
-#     return get_multiple_users_events(request)
 
 @app.post("/events/create-bulk")
 def create_bulk_events(event_request: BulkEventRequest):
@@ -972,6 +1099,197 @@ def get_multiple_users_events(body: getManagerRecruiter):
 
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
+
+@app.post("/events/availableMR")
+def get_available_time_slots(request: ManagerRecruiter):
+    """
+    ดึงข้อมูลเวลาว่างที่ตรงกันระหว่าง Manager และ Recruiter
+    แสดงเฉพาะช่วงเวลาว่างในระหว่าง 09:00 - 18:00 โดยแบ่งเป็นช่วงละ 30 นาที
+    """
+    results = []
+    
+    # ใช้ฟังก์ชัน get_people เพื่อรับรายชื่ออีเมลผู้ใช้แยกตามประเภท M และ R
+    users_dict = get_people(
+        file_path=str(FILE_PATH),
+        location=request.location,
+        english_min=request.english_min,
+        exp_kind=request.exp_kind,
+        age_key=request.age_key
+    )
+    
+    # กำหนดช่วงเวลาในการดึงข้อมูล
+    time_min = request.start_date + "T00:00:00Z" if request.start_date else datetime.utcnow().isoformat() + "Z"
+    time_max = request.end_date + "T23:59:59Z" if request.end_date else (datetime.utcnow() + timedelta(days=7)).isoformat() + "Z"
+    
+    # แปลงเวลาเป็น datetime objects
+    start_datetime = datetime.fromisoformat(time_min.replace('Z', '+00:00'))
+    end_datetime = datetime.fromisoformat(time_max.replace('Z', '+00:00'))
+    print(start_datetime)
+    print(end_datetime)
+
+    # สร้างรายการวันที่จะตรวจสอบ
+    date_list = []
+    current_date = start_datetime.date()
+    while current_date <= end_datetime.date():
+        date_list.append(current_date)
+        current_date += timedelta(days=1)
+    
+    # ดึงข้อมูลกิจกรรมสำหรับ Manager
+    managers_events = {}
+    for user_info in users_dict['M']:
+        email = user_info["Email"]
+        name = user_info["Name"]
+        calendar_id = email
+        
+        if is_token_valid(email):
+            try:
+                with open(os.path.join(TOKEN_DIR, f'token_{email}.json'), 'r') as token_file:
+                    token_data = json.load(token_file)
+                creds = Credentials.from_authorized_user_info(token_data, SCOPES)
+                
+                service = build('calendar', 'v3', credentials=creds)
+                
+                print(f"กำลังดึงข้อมูลสำหรับ M: {email} ({name}) จาก {time_min} ถึง {time_max}")
+                
+                events_result = service.events().list(
+                    calendarId=calendar_id,
+                    timeMin=time_min,
+                    timeMax=time_max,
+                    singleEvents=True,
+                    orderBy='startTime'
+                ).execute()
+                
+                events = events_result.get('items', [])
+                print(f"พบ {len(events)} กิจกรรมสำหรับ M: {email}")
+                
+                # เก็บข้อมูลกิจกรรม
+                managers_events[email] = {
+                    'name': name,
+                    'events': events
+                }
+            except Exception as e:
+                print(f"เกิดข้อผิดพลาดในการดึงข้อมูลสำหรับ M: {email}: {str(e)}")
+        else:
+            print(f"ผู้ใช้ {email} ยังไม่ได้ยืนยันตัวตน")
+    
+    # ดึงข้อมูลกิจกรรมสำหรับ Recruiter
+    recruiters_events = {}
+    for user_info in users_dict['R']:
+        email = user_info["Email"]
+        name = user_info["Name"]
+        calendar_id = email
+        
+        if is_token_valid(email):
+            try:
+                with open(os.path.join(TOKEN_DIR, f'token_{email}.json'), 'r') as token_file:
+                    token_data = json.load(token_file)
+                creds = Credentials.from_authorized_user_info(token_data, SCOPES)
+                
+                service = build('calendar', 'v3', credentials=creds)
+                
+                print(f"กำลังดึงข้อมูลสำหรับ R: {email} ({name}) จาก {time_min} ถึง {time_max}")
+                
+                events_result = service.events().list(
+                    calendarId=calendar_id,
+                    timeMin=time_min,
+                    timeMax=time_max,
+                    singleEvents=True,
+                    orderBy='startTime'
+                ).execute()
+                
+                events = events_result.get('items', [])
+                print(f"พบ {len(events)} กิจกรรมสำหรับ R: {email}")
+                
+                # เก็บข้อมูลกิจกรรม
+                recruiters_events[email] = {
+                    'name': name,
+                    'events': events
+                }
+            except Exception as e:
+                print(f"เกิดข้อผิดพลาดในการดึงข้อมูลสำหรับ R: {email}: {str(e)}")
+        else:
+            print(f"ผู้ใช้ {email} ยังไม่ได้ยืนยันตัวตน")
+    
+    # เช็คเวลาว่างที่ตรงกันสำหรับทุกคู่
+    available_slots = []
+    
+    # สร้างช่วงเวลาทุกๆ 30 นาที ระหว่าง 09:00-18:00 ของทุกวัน
+    for date in date_list:
+        for manager_email, manager_data in managers_events.items():
+            manager_name = manager_data['name']
+            manager_events = manager_data['events']
+            
+            for recruiter_email, recruiter_data in recruiters_events.items():
+                recruiter_name = recruiter_data['name']
+                recruiter_events = recruiter_data['events']
+                
+                # สร้างช่วงเวลาทุกๆ 30 นาที
+                time_slots = []
+                for hour in range(9, 18):
+                    for minute in [0, 30]:
+                        start_time = datetime.combine(date, time(hour, minute)).astimezone(timezone.utc)
+                        end_time = (start_time + timedelta(minutes=30)).astimezone(timezone.utc)
+                        time_slots.append((start_time, end_time))
+                
+                # ตรวจสอบว่าแต่ละช่วงเวลาว่างไหม
+                for slot_start, slot_end in time_slots:
+                    manager_is_available = is_available(manager_events, slot_start, slot_end)
+                    recruiter_is_available = is_available(recruiter_events, slot_start, slot_end)
+                    
+                    if manager_is_available and recruiter_is_available:
+                        # แปลงเป็นเวลาท้องถิ่น
+                        local_start = slot_start.astimezone().strftime("%Y-%m-%d %H:%M")
+                        local_end = slot_end.astimezone().strftime("%H:%M")
+                        
+                        available_slots.append({
+                            "date": slot_start.astimezone().strftime("%Y-%m-%d"),
+                            "start_time": slot_start.astimezone().strftime("%H:%M"),
+                            "end_time": slot_end.astimezone().strftime("%H:%M"),
+                            "display_time": f"{local_start} - {local_end}",
+                            "manager": {
+                                "email": manager_email,
+                                "name": manager_name
+                            },
+                            "recruiter": {
+                                "email": recruiter_email,
+                                "name": recruiter_name
+                            }
+                        })
+    
+    # จัดกลุ่มผลลัพธ์ตามวันที่และคู่ M-R
+    organized_results = {}
+    for slot in available_slots:
+        date = slot["date"]
+        pair_key = f"{slot['manager']['name']} - {slot['recruiter']['name']}"
+        
+        if date not in organized_results:
+            organized_results[date] = {}
+        
+        if pair_key not in organized_results[date]:
+            organized_results[date][pair_key] = []
+        
+        organized_results[date][pair_key].append({
+            "start_time": slot["start_time"],
+            "end_time": slot["end_time"]
+        })
+    
+    # สร้างผลลัพธ์สุดท้าย
+    final_results = []
+    for date, pairs in organized_results.items():
+        date_result = {
+            "date": date,
+            "available_pairs": []
+        }
+        
+        for pair_name, slots in pairs.items():
+            date_result["available_pairs"].append({
+                "pair": pair_name,
+                "available_slots": slots
+            })
+        
+        final_results.append(date_result)
+    
+    return JSONResponse(content={"available_time_slots": final_results})
 
 
 if __name__ == "__main__":
