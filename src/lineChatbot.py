@@ -1,3 +1,4 @@
+import asyncio
 import os
 import sys
 import threading
@@ -16,6 +17,8 @@ import requests
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 from test import send_post, get_available_users
 
+
+base_url = os.getenv("BASE_URL")
 # LINE API configuration
 CHANNEL_ACCESS_TOKEN = os.getenv("CHANNEL_ACCESS_TOKEN")
 CHANNEL_SECRET = os.getenv("CHANNEL_SECRET")
@@ -209,14 +212,9 @@ def create_calendar_flex_message(user_id):
         }
     )
 
-def create_user_selection_flex_message(user_id):
-    """Create a user selection flex message."""
-    # available_users = ['0827703801p@gmail.com', 'khunnapatt65@gmail.com', 'pemadee2546@gmail.com']
-    available_users = get_available_users()
+def create_user_selection_flex_message(user_id, available_users):
     items = []
-    
     for i, email in enumerate(available_users):
-
         items.append({
             "type": "box",
             "layout": "vertical",
@@ -227,7 +225,7 @@ def create_user_selection_flex_message(user_id):
                     "contents": [
                         {
                             "type": "image",
-                            "url": "https://img.icons8.com/ios-filled/100/000000/user-male-circle.png",  # ใช้แทน icon รูปคน
+                            "url": "https://img.icons8.com/ios-filled/100/000000/user-male-circle.png",
                             "size": "xs",
                             "aspectMode": "cover",
                             "aspectRatio": "1:1",
@@ -255,7 +253,7 @@ def create_user_selection_flex_message(user_id):
                     "style": "primary",
                     "height": "sm",
                     "margin": "md",
-                    "color": "#00C16A"  # เขียวดูโปร ไม่แสบตา
+                    "color": "#00C16A"
                 }
             ],
             "paddingAll": "12px",
@@ -267,7 +265,6 @@ def create_user_selection_flex_message(user_id):
             "borderWidth": "1px"
         })
 
-    
     return FlexSendMessage(
         alt_text="เลือกผู้เข้าร่วมประชุม",
         contents={
@@ -301,6 +298,17 @@ def create_user_selection_flex_message(user_id):
                 ]
             }
         }
+    )
+
+# เรียกใช้งาน create_user_selection_flex_message ไม่งั้นจะ timeout
+async def reply_with_user_selection(event, user_id, start_time, end_time):
+    available_users = await get_available_users()
+    line_bot_api.reply_message(
+        event.reply_token,
+        [
+            TextSendMessage(text=f"ช่วงเวลาที่ต้องการ: {start_time} - {end_time}"),
+            create_user_selection_flex_message(user_id, available_users)
+        ]
     )
 
 def create_meeting_summary_flex_message(user_id, meeting_data):
@@ -444,7 +452,6 @@ def create_meeting_summary_flex_message(user_id, meeting_data):
         }
     )
 
-
 def create_available_slots_flex_message(user_id, available_slots):
     """Create a flex message with available meeting slots."""
     items = []
@@ -503,7 +510,7 @@ def create_available_slots_flex_message(user_id, available_slots):
             }
         }
     )
-    
+
 @handler.add(MessageEvent, message=TextMessage)
 def handle_text_message(event):
     user_id = event.source.user_id
@@ -618,7 +625,7 @@ def handle_text_message(event):
                 }
             )
         )
-        add_user_email(email)
+        # add_user_email(email)
     
     # Handle user input based on current step
     elif user_sessions[user_id]["step"] == "enter_meeting_name":
@@ -646,13 +653,8 @@ def handle_text_message(event):
             user_sessions[user_id]["step"] = "select_attendees"
             
             # Display confirmation and attendee selection
-            line_bot_api.reply_message(
-                event.reply_token,
-                [
-                    TextSendMessage(text=f"ช่วงเวลาที่ต้องการ: {start_time} - {end_time}"),
-                    create_user_selection_flex_message(user_id)
-                ]
-            )
+            asyncio.create_task(reply_with_user_selection(event, user_id, start_time, end_time))
+
         except ValueError as e:
             line_bot_api.reply_message(
                 event.reply_token,
@@ -704,7 +706,7 @@ def handle_postback(event):
             return
         encoded_email = quote(email)
         # Create Google API URL (FastAPI endpoint)
-        api_url = f"https://083e-49-228-96-87.ngrok-free.app/events/{encoded_email}"
+        api_url = f"{base_url}/events/{encoded_email}"
         
         print(api_url)
         # Tell user they'll be redirected

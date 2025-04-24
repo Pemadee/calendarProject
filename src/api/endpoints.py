@@ -2,6 +2,7 @@
 import json
 import os
 from datetime import datetime, time, timedelta, timezone
+import ssl
 import sys
 # Third-party libraries
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
@@ -18,8 +19,14 @@ from src.lineChatbot import *
 from src.config import *
 from src.utils.func import *
 from src.models.schemas import *
+# ###################
+import logging
+
+logging.basicConfig(level=logging.INFO)
 
 
+
+load_dotenv()
 app = FastAPI(title="Google Calendar API", 
               description="API สำหรับดึงข้อมูลการลงเวลาจาก Google Calendar")
 
@@ -681,6 +688,14 @@ def list_registered_users():
             "message": "เกิดข้อผิดพลาดในการดึงรายการผู้ใช้"
         }
 
+
+# @app.get("/users/list")
+# def list_registered_users():
+#     logging.info("Received request for /users/list")
+#     users = ["a@gmail.com", "b@gmail.com", "c@gmail.com", "d@gmail.com"]
+#     logging.info(f"Returning users: {users}")
+#     return {"users": users}
+
 @app.post("/getManagerRecruiter")
 def get_multiple_users_events(body: getManagerRecruiter):
     try:
@@ -698,7 +713,6 @@ def get_multiple_users_events(body: getManagerRecruiter):
 
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
-
 
 @app.post("/events/availableMR")
 def get_available_time_slots(request: ManagerRecruiter):
@@ -916,3 +930,46 @@ def get_available_time_slots(request: ManagerRecruiter):
     }
     
     return JSONResponse(content=response)
+
+@app.post("/getmeeting")
+async def receive_meeting(request: Request):
+    data = await request.json()
+    print("📥 ได้รับข้อมูลจาก LINE BOT:", data)
+
+    subject = f"นัดปลาชุมกันนน [ชื่อ : {data['summary']}]"
+    body = f"""📝 ข้อมูลการประชุม:
+
+            📌 ชื่อ: {data['summary']}
+            📆 วันที่: {data['start_time'].split('T')[0]}
+            🕒 เวลา: {data['start_time'].split('T')[1][:5]} - {data['end_time'].split('T')[1][:5]}
+
+            👥 ผู้เข้าร่วม:
+            """ + "\n".join(f"- {email}" for email in data["user_emails"])
+
+    context = ssl._create_unverified_context()
+
+    for to_email in data["user_emails"]:
+        message = EmailMessage()
+        message["From"] = os.getenv("EMAIL_to_SEND_MESSAGE")
+        message["To"] = to_email
+        message["Subject"] = subject
+        message.set_content(body)
+
+        try:
+            await aiosmtplib.send(
+                message,
+                hostname="smtp.gmail.com",
+                port=587,
+                start_tls=True,
+                username=os.getenv("EMAIL_to_SEND_MESSAGE"),
+                password=os.getenv("PASSWORD_EMAIL"),
+                tls_context=context  # ใช้ context นี้แทน
+            )
+        except Exception as e:
+            print(f"❌ ส่งอีเมลไปยัง {to_email} ไม่สำเร็จ: {e}")
+
+    return JSONResponse(content={"status": "received", "detail": "ได้รับข้อมูลและส่งอีเมลแล้ว"})
+
+@app.get("/test")
+async def receive_meeting(request: Request):
+    pass

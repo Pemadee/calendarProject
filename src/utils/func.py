@@ -1,9 +1,11 @@
 # Standard library
+from email.message import EmailMessage
 import json
 import os
 from datetime import datetime, time, timedelta, timezone
 import sys
 # Third-party libraries
+import aiosmtplib
 from google.auth.transport.requests import Request as GoogleRequest
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow

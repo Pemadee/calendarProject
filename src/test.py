@@ -6,6 +6,9 @@ from typing import List, Dict, Optional, Union, Any
 from datetime import datetime
 import threading
 import requests
+import aiohttp
+import asyncio
+
 app = FastAPI()
 load_dotenv()
 base_url = os.getenv("BASE_URL")
@@ -82,15 +85,17 @@ def send_post(meeting_result):
     except Exception as e:
         print("❌ POST ล้มเหลว:", str(e))
 
-
-
-def get_available_users():
+async def get_available_users():
     try:
-        response = requests.get("https://083e-49-228-96-87.ngrok-free.app/users/list", timeout=5)
-        response.raise_for_status()  # ตรวจสอบว่า HTTP status 200
-        data = response.json()
-        return data.get("users", [])
+        timeout = aiohttp.ClientTimeout(total=10)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(f"{base_url}/users/list") as response:
+                if response.status == 200:
+                    data = await response.json()
+                    return data.get("users", [])
+                else:
+                    print("⚠️ ไม่ได้ status 200:", response.status)
+                    return []
     except Exception as e:
         print(f"❌ ดึง users ไม่สำเร็จ: {e}")
         return []
-
