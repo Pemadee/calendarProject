@@ -1,27 +1,20 @@
 import os
-
+import sys
 import threading
-
 from datetime import datetime, timedelta
 from typing import Dict, List, Any
 from dotenv import load_dotenv
 from pydantic import BaseModel
-
 from urllib.parse import quote
 from linebot import LineBotApi, WebhookHandler
-
 from linebot.models import (
     MessageEvent, TextMessage, TextSendMessage,
     FlexSendMessage, QuickReply, QuickReplyButton, MessageAction,
     PostbackEvent
 )
-
 import requests
-
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 from test import send_post, get_available_users
-
-load_dotenv()
-
 
 # LINE API configuration
 CHANNEL_ACCESS_TOKEN = os.getenv("CHANNEL_ACCESS_TOKEN")
@@ -65,13 +58,14 @@ class MeetingResult(BaseModel):
     attendees: List[Any] = []
 
 
-def add_user_email(email):
-    """Add a new user email to the available users list."""
-    # For production, this should update a database
-    if email not in available_users:
-        available_users.append(email)
-        return True
-    return False
+# def add_user_email(email):
+#     """Add a new user email to the available users list."""
+#     # For production, this should update a database
+#     if email not in available_users:
+#         available_users.append(email)
+#         return True
+#     return False
+
 def validate_email(email):
     """Simple email validation."""
     import re
