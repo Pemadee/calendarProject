@@ -13,6 +13,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from linebot.exceptions import InvalidSignatureError
 from typing import Optional
+import logging
 # Local application
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 from src.lineChatbot import *
@@ -25,8 +26,8 @@ import logging
 logging.basicConfig(level=logging.INFO)
 
 
-
 load_dotenv()
+
 app = FastAPI(title="Google Calendar API", 
               description="API สำหรับดึงข้อมูลการลงเวลาจาก Google Calendar")
 
@@ -42,7 +43,10 @@ app.add_middleware(
 
 REDIRECT_URI = 'http://localhost:8080/'  # กำหนด redirect URI 
 AUTH_PORT = 8080  # พอร์ต redirect
-FILE_PATH = os.getenv("FILE_PATH")
+FILE_PATH = os.path.join(os.path.dirname(__file__), '..', '..', os.getenv("FILE_PATH"))
+# ปอดการแจ้งเตือน INFO:googleapiclient.discovery_cache:file_cache is only supported with oauth2client<4.0.0
+logging.getLogger('googleapiclient.discovery_cache').setLevel(logging.ERROR)
+
 
 @app.get("/")
 def read_root():
@@ -306,7 +310,7 @@ def get_multiple_users_events(request: ManagerRecruiter):
     
     # ใช้ฟังก์ชัน get_people เพื่อรับรายชื่ออีเมลผู้ใช้แยกตามประเภท M และ R
     users_dict = get_people(
-        file_path=str(FILE_PATH),
+        file_path=FILE_PATH,
         location=request.location,
         english_min=request.english_min,
         exp_kind=request.exp_kind,
@@ -700,7 +704,7 @@ def list_registered_users():
 def get_multiple_users_events(body: getManagerRecruiter):
     try:
         people = get_people(
-            file_path='TESTt.xlsx',          
+            file_path=FILE_PATH,          
             location=body.location,
             english_min=body.english_min,
             exp_kind=body.exp_kind,
@@ -720,6 +724,7 @@ def get_available_time_slots(request: ManagerRecruiter):
     ดึงข้อมูลเวลาว่างที่ตรงกันระหว่าง Manager และ Recruiter
     แสดงเฉพาะช่วงเวลาว่างในระหว่าง 09:00 - 18:00 โดยแบ่งเป็นช่วงละ 30 นาที
     แสดงผลเรียงตามเวลา โดยแต่ละช่วงเวลาจะแสดงคู่ที่ว่างทั้งหมด
+    สามารถกำหนดระยะเวลา (time_period) เพื่อแสดงวันที่มีเวลาว่างตามจำนวนวันที่ต้องการ
     """
     # ใช้ฟังก์ชัน get_people เพื่อรับรายชื่ออีเมลผู้ใช้แยกตามประเภท M และ R
     users_dict = get_people(
@@ -730,13 +735,27 @@ def get_available_time_slots(request: ManagerRecruiter):
         age_key=request.age_key
     )
     
-    # กำหนดช่วงเวลาในการดึงข้อมูล
-    time_min = request.start_date + "T00:00:00Z" if request.start_date else datetime.utcnow().isoformat() + "Z"
-    time_max = request.end_date + "T23:59:59Z" if request.end_date else (datetime.utcnow() + timedelta(days=7)).isoformat() + "Z"
+    # กำหนดเวลาเริ่มต้น
+    if request.start_date:
+        start_datetime = datetime.fromisoformat(request.start_date).replace(hour=0, minute=0, second=0, microsecond=0)
+        time_min = start_datetime.strftime("%Y-%m-%dT%H:%M:%SZ")
+    else:
+        start_datetime = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        time_min = start_datetime.strftime("%Y-%m-%dT%H:%M:%SZ")
     
-    # แปลงเวลาเป็น datetime objects
-    start_datetime = datetime.fromisoformat(time_min.replace('Z', '+00:00'))
-    end_datetime = datetime.fromisoformat(time_max.replace('Z', '+00:00'))
+    # กำหนดช่วงเวลาในการดึงข้อมูล โดยใช้ time_period แทน end_date
+    # ถ้ามี time_period ให้ใช้ค่านั้น ถ้าไม่มีและมี end_date ให้ใช้ end_date
+    if request.time_period:
+    # ค้นหาเป็นระยะเวลา 30 วัน หรือมากกว่าจำนวนวันที่ต้องการ 3 เท่า
+        days_to_check = max(30, int(request.time_period) * 3)
+        end_datetime = start_datetime + timedelta(days=days_to_check)
+    elif request.end_date:
+        end_datetime = datetime.fromisoformat(request.end_date).replace(hour=23, minute=59, second=59)
+    else:
+        days_to_check = 7
+        end_datetime = start_datetime + timedelta(days=days_to_check)
+
+    time_max = end_datetime.strftime("%Y-%m-%dT%H:%M:%SZ")
     
     # สร้างรายการวันที่จะตรวจสอบ
     date_list = []
@@ -877,36 +896,51 @@ def get_available_time_slots(request: ManagerRecruiter):
             if available_pairs:
                 time_based_results[date][time_slot_key] = available_pairs
     
-    # แปลงเป็นรูปแบบที่เหมาะสมสำหรับการแสดงผลใน LINE
+    # เตรียมข้อมูลสำหรับแสดงผล
     line_friendly_results = []
+    days_found = 0  # ตัวแปรนับจำนวนวันที่มีเวลาว่าง
+    required_days = int(request.time_period) if request.time_period else (7 if not request.end_date else None)
     
-    for date, time_slots in time_based_results.items():
-        date_str = date.strftime("%Y-%m-%d")
+    # ถ้าใช้ time_period ให้ค้นหาวันที่ว่างตามจำนวนที่กำหนด
+    if required_days is not None:
+    # รวบรวมทุกวันที่มีเวลาว่าง
+        available_dates = []
+        for date, time_slots in time_based_results.items():
+            if time_slots:  # ถ้าวันนี้มีช่วงเวลาว่าง
+                available_dates.append(date)
         
-        if not time_slots:  # ถ้าไม่มีช่วงเวลาว่าง ให้ข้ามวันนี้ไป
-            continue
+        # เรียงลำดับวันที่
+        available_dates.sort()
         
-        date_data = {
-            "date": date_str,
-            "time_slots": []
-        }
+        # เลือกเฉพาะ N วันแรกตาม required_days
+        selected_dates = available_dates[:required_days]
         
-        for time_slot, pairs in time_slots.items():
-            # สร้างข้อความสำหรับแสดงคู่ที่ว่าง
-            pair_names = [p["pair"] for p in pairs]
+        # สร้างผลลัพธ์จากวันที่เลือก
+        for date in selected_dates:
+            date_str = date.strftime("%Y-%m-%d")
             
-            # เพิ่มข้อมูลช่วงเวลา
-            date_data["time_slots"].append({
-                "time": time_slot,
-                "available_pairs": pair_names,
-                "pair_details": pairs  # เก็บข้อมูลเพิ่มเติมไว้ด้วย
-            })
-        
-        # เรียงลำดับตามช่วงเวลา
-        date_data["time_slots"].sort(key=lambda x: x["time"])
-        
-        line_friendly_results.append(date_data)
-    
+            date_data = {
+                "date": date_str,
+                "time_slots": []
+            }
+            
+            for time_slot, pairs in time_based_results[date].items():
+                # สร้างข้อความสำหรับแสดงคู่ที่ว่าง
+                pair_names = [p["pair"] for p in pairs]
+                
+                # เพิ่มข้อมูลช่วงเวลา
+                date_data["time_slots"].append({
+                    "time": time_slot,
+                    "available_pairs": pair_names,
+                    "pair_details": pairs
+                })
+            
+            # เรียงลำดับตามช่วงเวลา
+            date_data["time_slots"].sort(key=lambda x: x["time"])
+            
+            line_friendly_results.append(date_data)
+
+
     # เรียงผลลัพธ์ตามวันที่
     line_friendly_results.sort(key=lambda x: x["date"])
     
@@ -930,6 +964,8 @@ def get_available_time_slots(request: ManagerRecruiter):
     }
     
     return JSONResponse(content=response)
+
+
 
 @app.post("/getmeeting")
 async def receive_meeting(request: Request):
