@@ -271,7 +271,7 @@ def handle_message(event):
             }
 
             try:
-                #พี่เปา
+                #TODO: พี่เปา
                 response = requests.post(f"{DATA_API_URL}/receive_manager_info", json=profile_json)
                 print("✅ ส่งข้อมูล Manager ไปยัง API แล้ว:", response.status_code)
             except Exception as e:
@@ -324,36 +324,36 @@ def handle_message(event):
             start_time = t.time()
             # Call data API to get available slots
             response = requests.post(
-                #ไม่ไหวแล้ว
+                #TODO: ไม่ไหวแล้ว
                 f"{DATA_API_URL}/calculate_available_slots",
                 json={"date": session["selected_date"], "date_iso": date_iso},
-                #json = {
-                #       "date": "01/05/2567",
-                #      "date_iso": "2024-05-01"
-                #     }
+                # TODO:json = {
+                # TODO:      "date": "01/05/2567",
+                # TODO:     "date_iso": "2024-05-01"
+                # TODO:    }
                 timeout=3
-                # ส่ง json ด้วย method POST ไป /calculate_available_slots
+                #TODO: ส่ง json ด้วย method POST ไป /calculate_available_slots
                 
             )
             elapsed_time = t.time() - start_time
             print(f"Request took {elapsed_time:.3f} seconds")
-                # ตัวอย่าง json ที่ได้รับ
-                #             {
-                # "available_slots": [
-                #     {
-                #     "date": "01/05/2567",
-                #     "time": "10:00-10:30",
-                #     "participants": ["nonlaneeud@gmail.com", "panupongpr3841@gmail.com"]
-                #     },
-                #     ...
-                # ]
-                # }
+                #TODO: ตัวอย่าง json ที่ได้รับ
+                #TODO:             {
+                #TODO: "available_slots": [
+                #TODO:     {
+                #TODO:     "date": "01/05/2567",
+                #TODO:     "time": "10:00-10:30",
+                #TODO:     "participants": ["nonlaneeud@gmail.com", "panupongpr3841@gmail.com"]
+                # TODO:    },
+                # TODO:    ...
+                #TODO: ]
+                #TODO: }
 
             if response.status_code == 200:
                 available_slots = response.json().get("available_slots", [])
                 session["available_slots"] = available_slots
                 send_time_slots(event.reply_token, available_slots)
-                #เอาไปประมวลผลต่อ send_time_slots ให้กรองสวยๆ และส่งให้ผู้ใช้
+                #TODO:เอาไปประมวลผลต่อ send_time_slots ให้กรองสวยๆ และส่งให้ผู้ใช้
             else:
                 line_bot_api.reply_message(
                     event.reply_token,
