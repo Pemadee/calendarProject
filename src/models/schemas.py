@@ -33,6 +33,7 @@ class ManagerRecruiter(BaseModel):
     age_key: str
     start_date: Optional[str] = None
     end_date: Optional[str] = None
+    time_period: Optional[str] = None
 
 # โมเดลสำหรับรับข้อมูล Manger Recruiter
 class getManagerRecruiter(BaseModel):
