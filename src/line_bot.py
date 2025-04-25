@@ -73,9 +73,11 @@ def handle_message(event):
         send_initial_options(event.reply_token)
         return
     
-    # Initial conversation or reset
-    if session["state"] == "initial":
+    # Initial state or any unknown message
+    if session["state"] == "initial" or text not in ["กรอกข้อมูล Manager", "วิธีการใช้"] and session["state"] not in ["profile_age", "profile_exp", "profile_eng_level", "profile_location", "profile_confirm", "select_date", "select_time_slot", "confirm"]:
+        session["state"] = "waiting_initial_choice"
         send_initial_options(event.reply_token)
+        return
     
     # Handle quick reply selection for initial options
     elif session["state"] == "waiting_initial_choice":
@@ -83,10 +85,9 @@ def handle_message(event):
             session["state"] = "profile_age"
             line_bot_api.reply_message(
                 event.reply_token,
-                TextSendMessage(text="กรุณาระบุอายุของคุณ")
+                TextSendMessage(text="กรุณาระบุอายุ")
             )
         elif text == "วิธีการใช้":
-            session["state"] = "initial"
             usage_text = "นี่คือบริการหาช่วงเวลานัดประชุมอัจฉริยะ หากอยากใช้ให้เลือกหรือพิมพ์ \"กรอกข้อมูล Manager\" หากอยากยกเลิกการทำงานในขั้นตอนใดขั้นตอนนึงสามารถพิมพ์ \"ยกเลิก\""
             
             # Send usage info with quick reply to start again
@@ -100,7 +101,11 @@ def handle_message(event):
                 event.reply_token,
                 TextSendMessage(text=usage_text, quick_reply=quick_reply)
             )
+            
+            # Keep state as waiting_initial_choice
+            session["state"] = "waiting_initial_choice"
         else:
+            # If user enters something else while waiting for choice
             send_initial_options(event.reply_token)
     
     # ================= PROFILE FLOW =================
@@ -122,7 +127,7 @@ def handle_message(event):
             line_bot_api.reply_message(
                 event.reply_token,
                 TextSendMessage(
-                    text="กรุณาเลือกประสบการณ์ของคุณ",
+                    text="กรุณาเลือกประสบการณ์",
                     quick_reply=quick_reply
                 )
             )
@@ -149,7 +154,7 @@ def handle_message(event):
             line_bot_api.reply_message(
                 event.reply_token,
                 TextSendMessage(
-                    text="กรุณาเลือกระดับภาษาอังกฤษของคุณ",
+                    text="กรุณาเลือกระดับภาษาอังกฤษ",
                     quick_reply=quick_reply
                 )
             )
@@ -228,7 +233,7 @@ def handle_message(event):
             line_bot_api.reply_message(
                 event.reply_token,
                 TextSendMessage(
-                    text=f"สรุปข้อมูลของคุณ:\n{profile_summary}\n\nต้องการยืนยันข้อมูลหรือไม่?",
+                    text=f"สรุปข้อมูล Manager :\n{profile_summary}\n\nต้องการยืนยันข้อมูลหรือไม่?",
                     quick_reply=quick_reply
                 )
             )
@@ -255,7 +260,21 @@ def handle_message(event):
             # Save profile data (you might want to save it to a database here)
             session["profile_completed"] = True
             session["state"] = "select_date"
-            
+                # 📦 สร้าง JSON ที่จะส่ง
+            profile_json = {
+                "location": session.get("location"),
+                "english_min": 5 if session.get("eng_level") == "ระดับ 5" else 4,
+                "exp_kind": "strong" if session.get("exp") == "Strong exp" else "non",
+                "age_key": str(session.get("age")),
+                "start_date": datetime.now().strftime("%Y-%m-%d"),
+                "time_period": "7"
+            }
+
+            try:
+                response = requests.post(f"{DATA_API_URL}/receive_manager_info", json=profile_json)
+                print("✅ ส่งข้อมูล Manager ไปยัง API แล้ว:", response.status_code)
+            except Exception as e:
+                print("❌ ส่งข้อมูลล้มเหลว:", e)
             # Now proceed to meeting scheduling flow
             line_bot_api.reply_message(
                 event.reply_token,
@@ -402,8 +421,8 @@ def handle_message(event):
             session["state"] = "initial"
             session["profile_completed"] = True
             
-            # Show initial options again
-            send_initial_options(user_id)
+            # Show initial options again after a delay
+            user_sessions[user_id] = {"state": "initial"}
             
         elif text == "ยกเลิกนัด":
             line_bot_api.reply_message(
@@ -425,18 +444,9 @@ def handle_message(event):
                 event.reply_token,
                 TextSendMessage(text="กรุณาเลือกจากตัวเลือกที่กำหนดให้ (สร้างนัด หรือ ยกเลิกนัด)")
             )
-    
-    else:
-        # Default response for any other state or text
-        send_initial_options(event.reply_token)
 
 def send_initial_options(reply_token_or_user_id):
     """Send initial options with Quick Reply"""
-    session = user_sessions.get(reply_token_or_user_id) if reply_token_or_user_id.startswith("U") else None
-    
-    if session:
-        session["state"] = "waiting_initial_choice"
-    
     items = [
         QuickReplyButton(action=MessageAction(label="กรอกข้อมูล Manager", text="กรอกข้อมูล Manager")),
         QuickReplyButton(action=MessageAction(label="วิธีการใช้", text="วิธีการใช้"))
@@ -453,7 +463,8 @@ def send_initial_options(reply_token_or_user_id):
     if isinstance(reply_token_or_user_id, str) and reply_token_or_user_id.startswith("U"):
         # It's a user_id
         line_bot_api.push_message(reply_token_or_user_id, message)
-        user_sessions[reply_token_or_user_id]["state"] = "waiting_initial_choice"
+        if reply_token_or_user_id in user_sessions:
+            user_sessions[reply_token_or_user_id]["state"] = "waiting_initial_choice"
     else:
         # It's a reply_token
         line_bot_api.reply_message(reply_token_or_user_id, message)
