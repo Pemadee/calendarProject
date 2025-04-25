@@ -250,12 +250,42 @@ async def calculate_available_slots(data: Dict[str, Any] = Body(...)):
     
     # รายการอีเมลที่ต้องการตรวจสอบ (อาจรับจาก config หรือฐานข้อมูล)
     emails = ["nonlaneeud@gmail.com", "panupongpr3841@gmail.com"]  # ปรับตามอีเมลที่คุณต้องการใช้งาน
-    
+    #อู้ยยยยยยย
     try:
         # เรียกใช้ function ที่ปรับปรุงแล้วเพื่อดึงข้อมูลปฏิทิน
-        req = MultiCalendarRequest(emails=emails, date=date_iso)
+        req = MultiCalendarRequest(emails=emails, date=date_iso) 
+        #req = {
+        #               "emails": ["nonlaneeud@gmail.com","panupongpr3841@gmail.com"],
+        #               "date": "2025-04-24"
+        #       }
         calendar_response = await get_multi_calendar_events(req)
+        #ได้ json ตอบกลับมาแบบนี้
+        #   {
+        #     "users": {
+        #         "nonlaneeud@gmail.com": {
+        #             "busy_slots": {
+        #                 "date": "24/04/2025",
+        #                 "time_slots": [
+        #                     "09:00-09:30",
+        #                     "10:00-10:30",
+        #                     "11:00-12:00"
+        #                 ]
+        #             }
+        #         },
+        #         "panupongpr3841@gmail.com": {
+        #             "busy_slots": {
+        #                 "date": "24/04/2025",
+        #                 "time_slots": [
+        #                     "09:00-10:00",
+        #                     "13:00-18:00"
+        #                 ]
+        #             }
+        #         }
+        #     }
+        # }  นำไปประมวลผลหาช่วงเวลาที่ว่างต่อ
         
+              
+        # ตรวจสอบว่ามีข้อมูลปฏิทินหรือไม่
         # ตรวจสอบว่ามี error หรือไม่
         if "error" in calendar_response:
             raise HTTPException(status_code=500, detail=f"Calendar API error: {calendar_response['error']}")
