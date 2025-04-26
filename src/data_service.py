@@ -365,6 +365,8 @@ async def create_meeting(meeting_data: Dict[str, Any] = Body(...)):
     
     # Add additional meeting info
     meeting_info = {
+        "name": meeting_data["name"],
+        "description": meeting_data["description"],
         "date": meeting_data["date"],
         "time": meeting_data["time"],
         "duration": "30 นาที",  # Default to 30 minutes
