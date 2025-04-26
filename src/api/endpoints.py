@@ -721,258 +721,252 @@ def get_multiple_users_events(body: getManagerRecruiter):
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
-# @app.post("/events/availableMR")
-# def get_available_time_slots(request: ManagerRecruiter):
-#     """
-#     ดึงข้อมูลเวลาว่างที่ตรงกันระหว่าง Manager และ Recruiter
-#     แสดงเฉพาะช่วงเวลาว่างในระหว่าง 09:00 - 18:00 โดยแบ่งเป็นช่วงละ 30 นาที
-#     แสดงผลเรียงตามเวลา โดยแต่ละช่วงเวลาจะแสดงคู่ที่ว่างทั้งหมด
-#     สามารถกำหนดระยะเวลา (time_period) เพื่อแสดงวันที่มีเวลาว่างตามจำนวนวันที่ต้องการ
-#     """
-#     # ใช้ฟังก์ชัน get_people เพื่อรับรายชื่ออีเมลผู้ใช้แยกตามประเภท M และ R
-#     users_dict = get_people(
-#         file_path=str(FILE_PATH),
-#         location=request.location,
-#         english_min=request.english_min,
-#         exp_kind=request.exp_kind,
-#         age_key=request.age_key
-#     )
+@app.post("/events/availableMR")
+def get_available_time_slots(request: ManagerRecruiter):
+    """
+    ดึงข้อมูลเวลาว่างที่ตรงกันระหว่าง Manager และ Recruiter
+    แสดงเฉพาะช่วงเวลาว่างในระหว่าง 09:00 - 18:00 โดยแบ่งเป็นช่วงละ 30 นาที
+    แสดงผลเรียงตามเวลา โดยแต่ละช่วงเวลาจะแสดงคู่ที่ว่างทั้งหมด
+    สามารถกำหนดระยะเวลา (time_period) เพื่อแสดงวันที่มีเวลาว่างตามจำนวนวันที่ต้องการ
+    """
+    # ใช้ฟังก์ชัน get_people เพื่อรับรายชื่ออีเมลผู้ใช้แยกตามประเภท M และ R
+    users_dict = get_people(
+        file_path=str(FILE_PATH),
+        location=request.location,
+        english_min=request.english_min,
+        exp_kind=request.exp_kind,
+        age_key=request.age_key
+    )
     
-#     # กำหนดเวลาเริ่มต้น
-#     if request.start_date:
-#         start_datetime = datetime.fromisoformat(request.start_date).replace(hour=0, minute=0, second=0, microsecond=0)
-#         time_min = start_datetime.strftime("%Y-%m-%dT%H:%M:%SZ")
-#     else:
-#         start_datetime = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-#         time_min = start_datetime.strftime("%Y-%m-%dT%H:%M:%SZ")
+    # กำหนดเวลาเริ่มต้น
+    if request.start_date:
+        start_datetime = datetime.fromisoformat(request.start_date).replace(hour=0, minute=0, second=0, microsecond=0)
+        time_min = start_datetime.strftime("%Y-%m-%dT%H:%M:%SZ")
+    else:
+        start_datetime = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        time_min = start_datetime.strftime("%Y-%m-%dT%H:%M:%SZ")
     
-#     # กำหนดช่วงเวลาในการดึงข้อมูล โดยใช้ time_period แทน end_date
-#     # ถ้ามี time_period ให้ใช้ค่านั้น ถ้าไม่มีและมี end_date ให้ใช้ end_date
-#     if request.time_period:
-#     # ค้นหาเป็นระยะเวลา 30 วัน หรือมากกว่าจำนวนวันที่ต้องการ 3 เท่า
-#         days_to_check = max(30, int(request.time_period) * 3)
-#         end_datetime = start_datetime + timedelta(days=days_to_check)
-#     elif request.end_date:
-#         end_datetime = datetime.fromisoformat(request.end_date).replace(hour=23, minute=59, second=59)
-#     else:
-#         days_to_check = 7
-#         end_datetime = start_datetime + timedelta(days=days_to_check)
+    # กำหนดช่วงเวลาในการดึงข้อมูล โดยใช้ time_period แทน end_date
+    # ถ้ามี time_period ให้ใช้ค่านั้น ถ้าไม่มีและมี end_date ให้ใช้ end_date
+    if request.time_period:
+    # ค้นหาเป็นระยะเวลา 30 วัน หรือมากกว่าจำนวนวันที่ต้องการ 3 เท่า
+        days_to_check = max(30, int(request.time_period) * 3)
+        end_datetime = start_datetime + timedelta(days=days_to_check)
+    elif request.end_date:
+        end_datetime = datetime.fromisoformat(request.end_date).replace(hour=23, minute=59, second=59)
+    else:
+        days_to_check = 7
+        end_datetime = start_datetime + timedelta(days=days_to_check)
 
-#     time_max = end_datetime.strftime("%Y-%m-%dT%H:%M:%SZ")
+    time_max = end_datetime.strftime("%Y-%m-%dT%H:%M:%SZ")
     
-#     # สร้างรายการวันที่จะตรวจสอบ
-#     date_list = []
-#     current_date = start_datetime.date()
-#     while current_date <= end_datetime.date():
-#         date_list.append(current_date)
-#         current_date += timedelta(days=1)
+    # สร้างรายการวันที่จะตรวจสอบ
+    date_list = []
+    current_date = start_datetime.date()
+    while current_date <= end_datetime.date():
+        date_list.append(current_date)
+        current_date += timedelta(days=1)
     
-#     # ดึงข้อมูลกิจกรรมสำหรับ Manager
-#     managers_events = {}
-#     for user_info in users_dict['M']:
-#         email = user_info["Email"]
-#         name = user_info["Name"]
-#         calendar_id = email
+    # ดึงข้อมูลกิจกรรมสำหรับ Manager
+    managers_events = {}
+    for user_info in users_dict['M']:
+        email = user_info["Email"]
+        name = user_info["Name"]
+        calendar_id = email
         
-#         if is_token_valid(email):
-#             try:
-#                 with open(os.path.join(TOKEN_DIR, f'token_{email}.json'), 'r') as token_file:
-#                     token_data = json.load(token_file)
-#                 creds = Credentials.from_authorized_user_info(token_data, SCOPES)
+        if is_token_valid(email):
+            try:
+                with open(os.path.join(TOKEN_DIR, f'token_{email}.json'), 'r') as token_file:
+                    token_data = json.load(token_file)
+                creds = Credentials.from_authorized_user_info(token_data, SCOPES)
                 
-#                 service = build('calendar', 'v3', credentials=creds)
+                service = build('calendar', 'v3', credentials=creds)
                 
-#                 print(f"กำลังดึงข้อมูลสำหรับ M: {email} ({name}) จาก {time_min} ถึง {time_max}")
+                print(f"กำลังดึงข้อมูลสำหรับ M: {email} ({name}) จาก {time_min} ถึง {time_max}")
                 
-#                 events_result = service.events().list(
-#                     calendarId=calendar_id,
-#                     timeMin=time_min,
-#                     timeMax=time_max,
-#                     singleEvents=True,
-#                     orderBy='startTime'
-#                 ).execute()
+                events_result = service.events().list(
+                    calendarId=calendar_id,
+                    timeMin=time_min,
+                    timeMax=time_max,
+                    singleEvents=True,
+                    orderBy='startTime'
+                ).execute()
                 
-#                 events = events_result.get('items', [])
-#                 print(f"พบ {len(events)} กิจกรรมสำหรับ M: {email}")
+                events = events_result.get('items', [])
+                print(f"พบ {len(events)} กิจกรรมสำหรับ M: {email}")
                 
-#                 # เก็บข้อมูลกิจกรรม
-#                 managers_events[email] = {
-#                     'name': name,
-#                     'events': events
-#                 }
-#             except Exception as e:
-#                 print(f"เกิดข้อผิดพลาดในการดึงข้อมูลสำหรับ M: {email}: {str(e)}")
-#         else:
-#             print(f"ผู้ใช้ {email} ยังไม่ได้ยืนยันตัวตน")
+                # เก็บข้อมูลกิจกรรม
+                managers_events[email] = {
+                    'name': name,
+                    'events': events
+                }
+            except Exception as e:
+                print(f"เกิดข้อผิดพลาดในการดึงข้อมูลสำหรับ M: {email}: {str(e)}")
+        else:
+            print(f"ผู้ใช้ {email} ยังไม่ได้ยืนยันตัวตน")
     
-#     # ดึงข้อมูลกิจกรรมสำหรับ Recruiter
-#     recruiters_events = {}
-#     for user_info in users_dict['R']:
-#         email = user_info["Email"]
-#         name = user_info["Name"]
-#         calendar_id = email
+    # ดึงข้อมูลกิจกรรมสำหรับ Recruiter
+    recruiters_events = {}
+    for user_info in users_dict['R']:
+        email = user_info["Email"]
+        name = user_info["Name"]
+        calendar_id = email
         
-#         if is_token_valid(email):
-#             try:
-#                 with open(os.path.join(TOKEN_DIR, f'token_{email}.json'), 'r') as token_file:
-#                     token_data = json.load(token_file)
-#                 creds = Credentials.from_authorized_user_info(token_data, SCOPES)
+        if is_token_valid(email):
+            try:
+                with open(os.path.join(TOKEN_DIR, f'token_{email}.json'), 'r') as token_file:
+                    token_data = json.load(token_file)
+                creds = Credentials.from_authorized_user_info(token_data, SCOPES)
                 
-#                 service = build('calendar', 'v3', credentials=creds)
+                service = build('calendar', 'v3', credentials=creds)
                 
-#                 print(f"กำลังดึงข้อมูลสำหรับ R: {email} ({name}) จาก {time_min} ถึง {time_max}")
+                print(f"กำลังดึงข้อมูลสำหรับ R: {email} ({name}) จาก {time_min} ถึง {time_max}")
                 
-#                 events_result = service.events().list(
-#                     calendarId=calendar_id,
-#                     timeMin=time_min,
-#                     timeMax=time_max,
-#                     singleEvents=True,
-#                     orderBy='startTime'
-#                 ).execute()
+                events_result = service.events().list(
+                    calendarId=calendar_id,
+                    timeMin=time_min,
+                    timeMax=time_max,
+                    singleEvents=True,
+                    orderBy='startTime'
+                ).execute()
                 
-#                 events = events_result.get('items', [])
-#                 print(f"พบ {len(events)} กิจกรรมสำหรับ R: {email}")
+                events = events_result.get('items', [])
+                print(f"พบ {len(events)} กิจกรรมสำหรับ R: {email}")
                 
-#                 # เก็บข้อมูลกิจกรรม
-#                 recruiters_events[email] = {
-#                     'name': name,
-#                     'events': events
-#                 }
-#             except Exception as e:
-#                 print(f"เกิดข้อผิดพลาดในการดึงข้อมูลสำหรับ R: {email}: {str(e)}")
-#         else:
-#             print(f"ผู้ใช้ {email} ยังไม่ได้ยืนยันตัวตน")
+                # เก็บข้อมูลกิจกรรม
+                recruiters_events[email] = {
+                    'name': name,
+                    'events': events
+                }
+            except Exception as e:
+                print(f"เกิดข้อผิดพลาดในการดึงข้อมูลสำหรับ R: {email}: {str(e)}")
+        else:
+            print(f"ผู้ใช้ {email} ยังไม่ได้ยืนยันตัวตน")
     
-#     # เก็บช่วงเวลาว่างตามวันที่
-#     # โครงสร้าง: time_based_results[date][time_slot] = [{คู่ที่ว่าง}]
-#     time_based_results = {}
+    # เก็บช่วงเวลาว่างตามวันที่
+    # โครงสร้าง: time_based_results[date][time_slot] = [{คู่ที่ว่าง}]
+    time_based_results = {}
     
-#     # ตรวจสอบเวลาว่างสำหรับทุกวัน
-#     for date in date_list:
-#         time_based_results[date] = {}
+    # ตรวจสอบเวลาว่างสำหรับทุกวัน
+    for date in date_list:
+        time_based_results[date] = {}
         
-#         # สร้างช่วงเวลาทุกๆ 30 นาที
-#         time_slots = []
-#         for hour in range(9, 18):
-#             for minute in [0, 30]:
-#                 slot_start = datetime.combine(date, time(hour, minute)).astimezone(timezone.utc)
-#                 slot_end = (slot_start + timedelta(minutes=30)).astimezone(timezone.utc)
-#                 time_slots.append((slot_start, slot_end))
+        # สร้างช่วงเวลาทุกๆ 30 นาที
+        time_slots = []
+        for hour in range(9, 18):
+            for minute in [0, 30]:
+                slot_start = datetime.combine(date, time(hour, minute)).astimezone(timezone.utc)
+                slot_end = (slot_start + timedelta(minutes=30)).astimezone(timezone.utc)
+                time_slots.append((slot_start, slot_end))
         
-#         # ตรวจสอบแต่ละช่วงเวลา
-#         for slot_start, slot_end in time_slots:
-#             # แปลงเป็นเวลาท้องถิ่นเพื่อแสดงผล
-#             local_start = slot_start.astimezone().strftime("%H:%M")
-#             local_end = slot_end.astimezone().strftime("%H:%M")
-#             time_slot_key = f"{local_start}-{local_end}"
+        # ตรวจสอบแต่ละช่วงเวลา
+        for slot_start, slot_end in time_slots:
+            # แปลงเป็นเวลาท้องถิ่นเพื่อแสดงผล
+            local_start = slot_start.astimezone().strftime("%H:%M")
+            local_end = slot_end.astimezone().strftime("%H:%M")
+            time_slot_key = f"{local_start}-{local_end}"
             
-#             # เก็บคู่ที่ว่างในช่วงเวลานี้
-#             available_pairs = []
+            # เก็บคู่ที่ว่างในช่วงเวลานี้
+            available_pairs = []
             
-#             # ตรวจสอบทุกคู่ M-R
-#             for manager_email, manager_data in managers_events.items():
-#                 manager_name = manager_data['name']
-#                 manager_events = manager_data['events']
+            # ตรวจสอบทุกคู่ M-R
+            for manager_email, manager_data in managers_events.items():
+                manager_name = manager_data['name']
+                manager_events = manager_data['events']
                 
-#                 for recruiter_email, recruiter_data in recruiters_events.items():
-#                     recruiter_name = recruiter_data['name']
-#                     recruiter_events = recruiter_data['events']
+                for recruiter_email, recruiter_data in recruiters_events.items():
+                    recruiter_name = recruiter_data['name']
+                    recruiter_events = recruiter_data['events']
                     
-#                     # ตรวจสอบว่าทั้งคู่ว่างหรือไม่
-#                     manager_is_available = is_available(manager_events, slot_start, slot_end)
-#                     recruiter_is_available = is_available(recruiter_events, slot_start, slot_end)
+                    # ตรวจสอบว่าทั้งคู่ว่างหรือไม่
+                    manager_is_available = is_available(manager_events, slot_start, slot_end)
+                    recruiter_is_available = is_available(recruiter_events, slot_start, slot_end)
                     
-#                     if manager_is_available and recruiter_is_available:
-#                         available_pairs.append({
-#                             "pair": f"{manager_name}-{recruiter_name}",
-#                             "manager": {
-#                                 "email": manager_email,
-#                                 "name": manager_name
-#                             },
-#                             "recruiter": {
-#                                 "email": recruiter_email,
-#                                 "name": recruiter_name
-#                             }
-#                         })
+                    if manager_is_available and recruiter_is_available:
+                        available_pairs.append({
+                            "pair": f"{manager_name}-{recruiter_name}",
+                            "manager": {
+                                "email": manager_email,
+                                "name": manager_name
+                            },
+                            "recruiter": {
+                                "email": recruiter_email,
+                                "name": recruiter_name
+                            }
+                        })
             
-#             # เก็บผลลัพธ์เฉพาะช่วงเวลาที่มีคู่ว่างอย่างน้อย 1 คู่
-#             if available_pairs:
-#                 time_based_results[date][time_slot_key] = available_pairs
+            # เก็บผลลัพธ์เฉพาะช่วงเวลาที่มีคู่ว่างอย่างน้อย 1 คู่
+            if available_pairs:
+                time_based_results[date][time_slot_key] = available_pairs
     
-#     # เตรียมข้อมูลสำหรับแสดงผล
-#     line_friendly_results = []
-#     days_found = 0  # ตัวแปรนับจำนวนวันที่มีเวลาว่าง
-#     required_days = int(request.time_period) if request.time_period else (7 if not request.end_date else None)
+    # เตรียมข้อมูลสำหรับแสดงผล
+    line_friendly_results = []
+    days_found = 0  # ตัวแปรนับจำนวนวันที่มีเวลาว่าง
+    required_days = int(request.time_period) if request.time_period else (7 if not request.end_date else None)
     
-#     # ถ้าใช้ time_period ให้ค้นหาวันที่ว่างตามจำนวนที่กำหนด
-#     if required_days is not None:
-#     # รวบรวมทุกวันที่มีเวลาว่าง
-#         available_dates = []
-#         for date, time_slots in time_based_results.items():
-#             if time_slots:  # ถ้าวันนี้มีช่วงเวลาว่าง
-#                 available_dates.append(date)
+    # ถ้าใช้ time_period ให้ค้นหาวันที่ว่างตามจำนวนที่กำหนด
+    if required_days is not None:
+    # รวบรวมทุกวันที่มีเวลาว่าง
+        available_dates = []
+        for date, time_slots in time_based_results.items():
+            if time_slots:  # ถ้าวันนี้มีช่วงเวลาว่าง
+                available_dates.append(date)
         
-#         # เรียงลำดับวันที่
-#         available_dates.sort()
+        # เรียงลำดับวันที่
+        available_dates.sort()
         
-#         # เลือกเฉพาะ N วันแรกตาม required_days
-#         selected_dates = available_dates[:required_days]
+        # เลือกเฉพาะ N วันแรกตาม required_days
+        selected_dates = available_dates[:required_days]
         
-#         # สร้างผลลัพธ์จากวันที่เลือก
-#         for date in selected_dates:
-#             date_str = date.strftime("%Y-%m-%d")
+        # สร้างผลลัพธ์จากวันที่เลือก
+        for date in selected_dates:
+            date_str = date.strftime("%Y-%m-%d")
             
-#             date_data = {
-#                 "date": date_str,
-#                 "time_slots": []
-#             }
+            date_data = {
+                "date": date_str,
+                "time_slots": []
+            }
             
-#             for time_slot, pairs in time_based_results[date].items():
-#                 # สร้างข้อความสำหรับแสดงคู่ที่ว่าง
-#                 pair_names = [p["pair"] for p in pairs]
+            for time_slot, pairs in time_based_results[date].items():
+                # สร้างข้อความสำหรับแสดงคู่ที่ว่าง
+                pair_names = [p["pair"] for p in pairs]
                 
-#                 # เพิ่มข้อมูลช่วงเวลา
-#                 date_data["time_slots"].append({
-#                     "time": time_slot,
-#                     "available_pairs": pair_names,
-#                     "pair_details": pairs
-#                 })
+                # เพิ่มข้อมูลช่วงเวลา
+                date_data["time_slots"].append({
+                    "time": time_slot,
+                    "available_pairs": pair_names,
+                    "pair_details": pairs
+                })
             
-#             # เรียงลำดับตามช่วงเวลา
-#             date_data["time_slots"].sort(key=lambda x: x["time"])
+            # เรียงลำดับตามช่วงเวลา
+            date_data["time_slots"].sort(key=lambda x: x["time"])
             
-#             line_friendly_results.append(date_data)
+            line_friendly_results.append(date_data)
 
 
-#     # เรียงผลลัพธ์ตามวันที่
-#     line_friendly_results.sort(key=lambda x: x["date"])
+    # เรียงผลลัพธ์ตามวันที่
+    line_friendly_results.sort(key=lambda x: x["date"])
     
-#     # สร้างข้อความสรุปสำหรับ LINE
-#     line_summary = []
+    # สร้างข้อความสรุปสำหรับ LINE
+    line_summary = []
     
-#     for date_data in line_friendly_results:
-#         line_summary.append(f"วันที่ {date_data['date']}")
+    for date_data in line_friendly_results:
+        line_summary.append(f"วันที่ {date_data['date']}")
         
-#         for slot in date_data["time_slots"]:
-#             time_str = slot["time"]
-#             pairs_str = ", ".join(slot["available_pairs"])
-#             line_summary.append(f"เวลา {time_str} มีคู่ว่าง: {pairs_str}")
+        for slot in date_data["time_slots"]:
+            time_str = slot["time"]
+            pairs_str = ", ".join(slot["available_pairs"])
+            line_summary.append(f"เวลา {time_str} มีคู่ว่าง: {pairs_str}")
         
-#         line_summary.append("------------------------")
+        line_summary.append("------------------------")
     
-#     # สร้าง response
-#     response = {
-#         "available_time_slots": line_friendly_results,
-#         "line_summary": "\n".join(line_summary)
-#     }
+    # สร้าง response
+    response = {
+        "available_time_slots": line_friendly_results,
+        "line_summary": "\n".join(line_summary)
+    }
     
-#     return JSONResponse(content=response)
-
-
-
-
-
-
+    return JSONResponse(content=response)
 
 @app.post("/getmeeting")
 async def receive_meeting(request: Request):
