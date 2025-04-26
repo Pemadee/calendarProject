@@ -5,6 +5,7 @@ import os
 from datetime import datetime, time, timedelta, timezone
 import ssl
 import sys
+import uuid
 # Third-party libraries
 import aiofiles
 from dotenv import load_dotenv
@@ -17,9 +18,11 @@ from googleapiclient.discovery import build
 from linebot.exceptions import InvalidSignatureError
 from typing import Optional
 import logging
+from linebot import LineBotApi, WebhookHandler
+
+
 # Local application
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
-from src.line_bot import *
 from src.config import *
 from src.utils.func import *
 from src.models.schemas import *
@@ -49,6 +52,8 @@ AUTH_PORT = 8080  # พอร์ต redirect
 FILE_PATH = os.path.join(os.path.dirname(__file__), '..', '..', os.getenv("FILE_PATH"))
 # ปอดการแจ้งเตือน INFO:googleapiclient.discovery_cache:file_cache is only supported with oauth2client<4.0.0
 logging.getLogger('googleapiclient.discovery_cache').setLevel(logging.ERROR)
+line_bot_api = LineBotApi(os.getenv("CHANNEL_ACCESS_TOKEN"))
+handler = WebhookHandler(os.getenv("CHANNEL_SECRET"))
 
 
 @app.get("/")
@@ -57,18 +62,17 @@ def read_root():
 
 @app.post("/webhook")
 async def webhook(request: Request):
-    # Get X-Line-Signature header and request body
     signature = request.headers.get("X-Line-Signature", "")
     body = await request.body()
     body_decode = body.decode("utf-8")
-    
+
     try:
-        # Handle webhook body
         handler.handle(body_decode, signature)
     except InvalidSignatureError:
         raise HTTPException(status_code=400, detail="Invalid signature")
-    
+
     return JSONResponse(content={"status": "OK"})
+
 
 @app.get("/oauth2callback")
 def oauth2callback(code: str, state: str = None):
@@ -696,13 +700,6 @@ def list_registered_users():
         }
 
 
-# @app.get("/users/list")
-# def list_registered_users():
-#     logging.info("Received request for /users/list")
-#     users = ["a@gmail.com", "b@gmail.com", "c@gmail.com", "d@gmail.com"]
-#     logging.info(f"Returning users: {users}")
-#     return {"users": users}
-
 @app.post("/getManagerRecruiter")
 def get_multiple_users_events(body: getManagerRecruiter):
     try:
@@ -968,45 +965,243 @@ def get_available_time_slots(request: ManagerRecruiter):
     
     return JSONResponse(content=response)
 
-@app.post("/getmeeting")
-async def receive_meeting(request: Request):
-    data = await request.json()
-    print("📥 ได้รับข้อมูลจาก LINE BOT:", data)
+# # ฟังก์ชันหลักที่จะเรียกใช้ async
+# @app.post("/events/availableMR")
+# async def get_available_time_slots(request: ManagerRecruiter):
+#     """
+#     ดึงข้อมูลเวลาว่างที่ตรงกันระหว่าง Manager และ Recruiter
+#     แสดงเฉพาะช่วงเวลาว่างในระหว่าง 09:00 - 18:00 โดยแบ่งเป็นช่วงละ 30 นาที
+#     แสดงผลเรียงตามเวลา โดยแต่ละช่วงเวลาจะแสดงคู่ที่ว่างทั้งหมด
+#     สามารถกำหนดระยะเวลา (time_period) เพื่อแสดงวันที่มีเวลาว่างตามจำนวนวันที่ต้องการ
+#     """
+#     # ใช้ฟังก์ชัน get_people เพื่อรับรายชื่ออีเมลผู้ใช้แยกตามประเภท M และ R
+#     users_dict = get_people(
+#         file_path=str(FILE_PATH),
+#         location=request.location,
+#         english_min=request.english_min,
+#         exp_kind=request.exp_kind,
+#         age_key=request.age_key
+#     )
+    
+#     # กำหนดเวลาเริ่มต้น
+#     if request.start_date:
+#         start_datetime = datetime.fromisoformat(request.start_date).replace(hour=0, minute=0, second=0, microsecond=0)
+#         time_min = start_datetime.strftime("%Y-%m-%dT%H:%M:%SZ")
+#     else:
+#         start_datetime = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+#         time_min = start_datetime.strftime("%Y-%m-%dT%H:%M:%SZ")
+    
+#     # กำหนดช่วงเวลาในการดึงข้อมูล โดยใช้ time_period แทน end_date
+#     if request.time_period:
+#         days_to_check = max(30, int(request.time_period) * 3)
+#         end_datetime = start_datetime + timedelta(days=days_to_check)
+#     elif request.end_date:
+#         end_datetime = datetime.fromisoformat(request.end_date).replace(hour=23, minute=59, second=59)
+#     else:
+#         days_to_check = 7
+#         end_datetime = start_datetime + timedelta(days=days_to_check)
 
-    subject = f"นัดปลาชุมกันนน [ชื่อ : {data['summary']}]"
-    body = f"""📝 ข้อมูลการประชุม:
+#     time_max = end_datetime.strftime("%Y-%m-%dT%H:%M:%SZ")
+    
+#     # สร้างรายการวันที่จะตรวจสอบ
+#     date_list = []
+#     current_date = start_datetime.date()
+#     while current_date <= end_datetime.date():
+#         date_list.append(current_date)
+#         current_date += timedelta(days=1)
+    
+#     # สร้าง tasks สำหรับการดึงข้อมูลแบบ async
+#     manager_tasks = []
+#     for user_info in users_dict['M']:
+#         email = user_info["Email"]
+#         name = user_info["Name"]
+        
+#         if is_token_valid(email):
+#             manager_tasks.append(get_calendar_events(email, name, time_min, time_max))
+    
+#     recruiter_tasks = []
+#     for user_info in users_dict['R']:
+#         email = user_info["Email"]
+#         name = user_info["Name"]
+        
+#         if is_token_valid(email):
+#             recruiter_tasks.append(get_calendar_events(email, name, time_min, time_max))
+    
+#     # รันทุก task พร้อมกัน
+#     manager_results = await asyncio.gather(*manager_tasks)
+#     recruiter_results = await asyncio.gather(*recruiter_tasks)
+    
+#     # แปลงผลลัพธ์เป็นรูปแบบที่เหมาะสม
+#     managers_events = {}
+#     for result in manager_results:
+#         managers_events[result['email']] = {
+#             'name': result['name'],
+#             'events': result['events']
+#         }
+    
+#     recruiters_events = {}
+#     for result in recruiter_results:
+#         recruiters_events[result['email']] = {
+#             'name': result['name'],
+#             'events': result['events']
+#         }
+    
+#     # เก็บช่วงเวลาว่างตามวันที่
+#     time_based_results = {}
+    
+#     # ทำการวิเคราะห์ช่วงเวลาว่างแบบ async
+#     async def analyze_date(date):
+#         date_results = {}
+        
+#         # สร้างช่วงเวลาทุกๆ 30 นาที
+#         time_slots = []
+#         for hour in range(9, 18):
+#             for minute in [0, 30]:
+#                 slot_start = datetime.combine(date, time(hour, minute)).astimezone(timezone.utc)
+#                 slot_end = (slot_start + timedelta(minutes=30)).astimezone(timezone.utc)
+#                 time_slots.append((slot_start, slot_end))
+        
+#         # ตรวจสอบแต่ละช่วงเวลา
+#         for slot_start, slot_end in time_slots:
+#             # แปลงเป็นเวลาท้องถิ่นเพื่อแสดงผล
+#             local_start = slot_start.astimezone().strftime("%H:%M")
+#             local_end = slot_end.astimezone().strftime("%H:%M")
+#             time_slot_key = f"{local_start}-{local_end}"
+            
+#             # เก็บคู่ที่ว่างในช่วงเวลานี้
+#             available_pairs = []
+            
+#             # ตรวจสอบทุกคู่ M-R
+#             for manager_email, manager_data in managers_events.items():
+#                 manager_name = manager_data['name']
+#                 manager_events = manager_data['events']
+                
+#                 for recruiter_email, recruiter_data in recruiters_events.items():
+#                     recruiter_name = recruiter_data['name']
+#                     recruiter_events = recruiter_data['events']
+                    
+#                     # ตรวจสอบว่าทั้งคู่ว่างหรือไม่ โดยใช้ฟังก์ชัน is_available ที่มีอยู่แล้ว
+#                     manager_is_available = is_available(manager_events, slot_start, slot_end)
+#                     recruiter_is_available = is_available(recruiter_events, slot_start, slot_end)
+                    
+#                     if manager_is_available and recruiter_is_available:
+#                         available_pairs.append({
+#                             "pair": f"{manager_name}-{recruiter_name}",
+#                             "manager": {
+#                                 "email": manager_email,
+#                                 "name": manager_name
+#                             },
+#                             "recruiter": {
+#                                 "email": recruiter_email,
+#                                 "name": recruiter_name
+#                             }
+#                         })
+            
+#             # เก็บผลลัพธ์เฉพาะช่วงเวลาที่มีคู่ว่างอย่างน้อย 1 คู่
+#             if available_pairs:
+#                 date_results[time_slot_key] = available_pairs
+        
+#         return date, date_results
+    
+#     # วิเคราะห์ข้อมูลทุกวันพร้อมกัน
+#     date_analysis_tasks = [analyze_date(date) for date in date_list]
+#     date_analysis_results = await asyncio.gather(*date_analysis_tasks)
+    
+#     # รวมผลลัพธ์
+#     for date, results in date_analysis_results:
+#         if results:  # ถ้ามีช่วงเวลาว่างในวันนี้
+#             time_based_results[date] = results
+    
+#     # เตรียมข้อมูลสำหรับแสดงผล
+#     line_friendly_results = []
+#     required_days = int(request.time_period) if request.time_period else (7 if not request.end_date else None)
+    
+#     # ถ้าใช้ time_period ให้ค้นหาวันที่ว่างตามจำนวนที่กำหนด
+#     if required_days is not None:
+#         # รวบรวมทุกวันที่มีเวลาว่าง
+#         available_dates = []
+#         for date, time_slots in time_based_results.items():
+#             if time_slots:  # ถ้าวันนี้มีช่วงเวลาว่าง
+#                 available_dates.append(date)
+        
+#         # เรียงลำดับวันที่
+#         available_dates.sort()
+        
+#         # เลือกเฉพาะ N วันแรกตาม required_days
+#         selected_dates = available_dates[:required_days]
+        
+#         # สร้างผลลัพธ์จากวันที่เลือก
+#         for date in selected_dates:
+#             date_str = date.strftime("%Y-%m-%d")
+            
+#             date_data = {
+#                 "date": date_str,
+#                 "time_slots": []
+#             }
+            
+#             for time_slot, pairs in time_based_results[date].items():
+#                 # สร้างข้อความสำหรับแสดงคู่ที่ว่าง
+#                 pair_names = [p["pair"] for p in pairs]
+                
+#                 # เพิ่มข้อมูลช่วงเวลา
+#                 date_data["time_slots"].append({
+#                     "time": time_slot,
+#                     "available_pairs": pair_names,
+#                     "pair_details": pairs
+#                 })
+            
+#             # เรียงลำดับตามช่วงเวลา
+#             date_data["time_slots"].sort(key=lambda x: x["time"])
+            
+#             line_friendly_results.append(date_data)
+#     else:
+#         # ถ้าไม่ได้ใช้ time_period ให้แสดงทุกวันที่มีเวลาว่าง
+#         for date, time_slots in time_based_results.items():
+#             if time_slots:  # ถ้าวันนี้มีช่วงเวลาว่าง
+#                 date_str = date.strftime("%Y-%m-%d")
+                
+#                 date_data = {
+#                     "date": date_str,
+#                     "time_slots": []
+#                 }
+                
+#                 for time_slot, pairs in time_slots.items():
+#                     pair_names = [p["pair"] for p in pairs]
+                    
+#                     date_data["time_slots"].append({
+#                         "time": time_slot,
+#                         "available_pairs": pair_names,
+#                         "pair_details": pairs
+#                     })
+                
+#                 date_data["time_slots"].sort(key=lambda x: x["time"])
+#                 line_friendly_results.append(date_data)
 
-            📌 ชื่อ: {data['summary']}
-            📆 วันที่: {data['start_time'].split('T')[0]}
-            🕒 เวลา: {data['start_time'].split('T')[1][:5]} - {data['end_time'].split('T')[1][:5]}
+#     # เรียงผลลัพธ์ตามวันที่
+#     line_friendly_results.sort(key=lambda x: x["date"])
+    
+#     # สร้างข้อความสรุปสำหรับ LINE
+#     line_summary = []
+    
+#     for date_data in line_friendly_results:
+#         line_summary.append(f"วันที่ {date_data['date']}")
+        
+#         for slot in date_data["time_slots"]:
+#             time_str = slot["time"]
+#             pairs_str = ", ".join(slot["available_pairs"])
+#             line_summary.append(f"เวลา {time_str} มีคู่ว่าง: {pairs_str}")
+        
+#         line_summary.append("------------------------")
+    
+#     # สร้าง response
+#     response = {
+#         "available_time_slots": line_friendly_results,
+#         "line_summary": "\n".join(line_summary)
+#     }
+    
+#     return JSONResponse(content=response)
 
-            👥 ผู้เข้าร่วม:
-            """ + "\n".join(f"- {email}" for email in data["user_emails"])
 
-    context = ssl._create_unverified_context()
 
-    for to_email in data["user_emails"]:
-        message = EmailMessage()
-        message["From"] = os.getenv("EMAIL_to_SEND_MESSAGE")
-        message["To"] = to_email
-        message["Subject"] = subject
-        message.set_content(body)
 
-        try:
-            await aiosmtplib.send(
-                message,
-                hostname="smtp.gmail.com",
-                port=587,
-                start_tls=True,
-                username=os.getenv("EMAIL_to_SEND_MESSAGE"),
-                password=os.getenv("PASSWORD_EMAIL"),
-                tls_context=context  # ใช้ context นี้แทน
-            )
-        except Exception as e:
-            print(f"❌ ส่งอีเมลไปยัง {to_email} ไม่สำเร็จ: {e}")
-
-    return JSONResponse(content={"status": "received", "detail": "ได้รับข้อมูลและส่งอีเมลแล้ว"})
-
-@app.get("/test")
-async def receive_meeting(request: Request):
-    pass
+ 

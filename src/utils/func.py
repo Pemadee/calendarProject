@@ -1,4 +1,6 @@
 # Standard library
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from email.message import EmailMessage
 from functools import lru_cache
 import json
@@ -13,10 +15,16 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 import pandas as pd
+
+
+
 # Local application
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
+# from src.api.endpoints import FILE_PATH
 from src.config import *
-
+from src.api.endpoints import *
+from src.models.schemas import ManagerRecruiter
+thread_pool = ThreadPoolExecutor(max_workers=20)
 
 
 def is_token_valid(user_email: str) -> bool:
@@ -253,69 +261,69 @@ def get_people(file_path,
 
     return {'M': list_M, 'R': list_R}
 
-# def get_email(file_path,
-#                location=None,
-#                english_min=None,
-#                exp_kind=None,
-#                age_key=None):
-#     """
-#     อ่านไฟล์ Excel แล้วกรองข้อมูลตามเงื่อนไข
-#     คืนข้อมูลในรูปแบบ list ของ dict ที่มีแค่ email
-#     """
+def get_email(file_path,
+               location=None,
+               english_min=None,
+               exp_kind=None,
+               age_key=None):
+    """
+    อ่านไฟล์ Excel แล้วกรองข้อมูลตามเงื่อนไข
+    คืนข้อมูลในรูปแบบ list ของ dict ที่มีแค่ email
+    """
 
-#     # ---------- 1) โหลดทุกชีต ----------
-#     sheets = pd.read_excel(file_path, sheet_name=None)
-#     df_M = sheets['M'].copy()
-#     df_R = sheets['R'].copy()
+    # ---------- 1) โหลดทุกชีต ----------
+    sheets = pd.read_excel(file_path, sheet_name=None)
+    df_M = sheets['M'].copy()
+    df_R = sheets['R'].copy()
 
-#     # ---------- 2) เปลี่ยนชื่อคอลัมน์แรกเป็น Name ----------
-#     df_M.rename(columns={df_M.columns[0]: 'Name'}, inplace=True)
-#     df_R.rename(columns={df_R.columns[0]: 'Name'}, inplace=True)
+    # ---------- 2) เปลี่ยนชื่อคอลัมน์แรกเป็น Name ----------
+    df_M.rename(columns={df_M.columns[0]: 'Name'}, inplace=True)
+    df_R.rename(columns={df_R.columns[0]: 'Name'}, inplace=True)
 
-#     # ---------- 3) เติมคอลัมน์ Location ----------
-#     df_M = add_location_column(df_M)
-#     df_R = add_location_column(df_R)
+    # ---------- 3) เติมคอลัมน์ Location ----------
+    df_M = add_location_column(df_M)
+    df_R = add_location_column(df_R)
 
-#     # ---------- 4) ตัดแถวตัวคั่น (Email เป็น NaN) ----------
-#     df_M = df_M[df_M['Email'].notna()].reset_index(drop=True)
-#     df_R = df_R[df_R['Email'].notna()].reset_index(drop=True)
+    # ---------- 4) ตัดแถวตัวคั่น (Email เป็น NaN) ----------
+    df_M = df_M[df_M['Email'].notna()].reset_index(drop=True)
+    df_R = df_R[df_R['Email'].notna()].reset_index(drop=True)
 
-#     # ---------- 5) กรองตาม Location ----------
-#     if location:
-#         df_M = df_M[df_M['Location'].str.contains(location, case=False, na=False)]
-#         df_R = df_R[df_R['Location'].str.contains(location, case=False, na=False)]
+    # ---------- 5) กรองตาม Location ----------
+    if location:
+        df_M = df_M[df_M['Location'].str.contains(location, case=False, na=False)]
+        df_R = df_R[df_R['Location'].str.contains(location, case=False, na=False)]
 
-#     # ---------- 6) กรอง English ----------
-#     if english_min is not None and 'English' in df_M.columns:
-#         df_M['Eng_num'] = pd.to_numeric(df_M['English'], errors='coerce')
-#         df_M = df_M[df_M['Eng_num'] >= english_min]
+    # ---------- 6) กรอง English ----------
+    if english_min is not None and 'English' in df_M.columns:
+        df_M['Eng_num'] = pd.to_numeric(df_M['English'], errors='coerce')
+        df_M = df_M[df_M['Eng_num'] >= english_min]
 
-#     # ---------- 7) กรอง Experience ----------
-#     if exp_kind and 'Experience' in df_M.columns:
-#         exp_low = df_M['Experience'].str.lower()
-#         if exp_kind.lower() == 'strong':
-#             cond = exp_low.str.contains('strong', na=False) & \
-#                    ~exp_low.str.contains('non', na=False)
-#             df_M = df_M[cond]
-#         else:
-#             df_M = df_M[exp_low.str.contains(exp_kind.lower(), na=False)]
+    # ---------- 7) กรอง Experience ----------
+    if exp_kind and 'Experience' in df_M.columns:
+        exp_low = df_M['Experience'].str.lower()
+        if exp_kind.lower() == 'strong':
+            cond = exp_low.str.contains('strong', na=False) & \
+                   ~exp_low.str.contains('non', na=False)
+            df_M = df_M[cond]
+        else:
+            df_M = df_M[exp_low.str.contains(exp_kind.lower(), na=False)]
 
-#     # ---------- 8) กรอง Age ----------
-#     if age_key and 'Age' in df_M.columns:
-#         df_M = df_M[df_M['Age'].str.contains(age_key, case=False, na=False)]
+    # ---------- 8) กรอง Age ----------
+    if age_key and 'Age' in df_M.columns:
+        df_M = df_M[df_M['Age'].str.contains(age_key, case=False, na=False)]
 
-#     # ---------- 9) สร้าง list ของ dict ในรูปแบบที่ต้องการ ----------
-#     result = []
+    # ---------- 9) สร้าง list ของ dict ในรูปแบบที่ต้องการ ----------
+    result = []
     
-#     # เพิ่มอีเมลจาก M list
-#     for _, row in df_M.iterrows():
-#         result.append({"email": row['Email']})
+    # เพิ่มอีเมลจาก M list
+    for _, row in df_M.iterrows():
+        result.append({"email": row['Email']})
     
-#     # เพิ่มอีเมลจาก R list
-#     for _, row in df_R.iterrows():
-#         result.append({"email": row['Email']})
+    # เพิ่มอีเมลจาก R list
+    for _, row in df_R.iterrows():
+        result.append({"email": row['Email']})
     
-#     return result
+    return result
 
 def is_available(events, start_time, end_time):
     """
@@ -345,4 +353,6 @@ def parse_event_time(time_str):
         # กรณีมีแต่วันที่ (date)
         dt = datetime.strptime(time_str, '%Y-%m-%d')
         return dt.replace(tzinfo=timezone.utc)
+
+
 
