@@ -39,21 +39,6 @@ user_sessions = {}
 # Configuration for data API service
 base_url = os.getenv("BASE_URL")# Data service URL
 
-@app.get("/")
-def read_root():
-    return {"message": "Hello, Line!"}
-
-# @app.post("/callback")
-# async def callback(request: Request):
-#     signature = request.headers.get('X-Line-Signature', '')
-#     body = await request.body()
-    
-#     try:
-#         handler.handle(body.decode('utf-8'), signature)
-#     except InvalidSignatureError:
-#         raise HTTPException(status_code=400, detail="Invalid signature")
-    
-#     return Response(content="OK", media_type="text/plain")
 
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
@@ -74,15 +59,11 @@ def handle_message(event):
         send_initial_options(event.reply_token)
         return
     
-<<<<<<< HEAD
-    # Initial conversation or reset
-    if session["state"] == "initial":
-=======
     # Initial state or any unknown message
     if session["state"] == "initial" or text not in ["กรอกข้อมูล Manager", "วิธีการใช้"] and session["state"] not in ["profile_age", "profile_exp", "profile_eng_level", "profile_location", "profile_confirm", "select_date", "select_time_slot", "confirm","meeting_name","meeting_description","meeting_summary"]:
         session["state"] = "waiting_initial_choice"
->>>>>>> e6cd4a00c4e2f5248423ba25f37144e227f9766b
         send_initial_options(event.reply_token)
+        return
     
     # Handle quick reply selection for initial options
     elif session["state"] == "waiting_initial_choice":
@@ -90,10 +71,9 @@ def handle_message(event):
             session["state"] = "profile_age"
             line_bot_api.reply_message(
                 event.reply_token,
-                TextSendMessage(text="กรุณาระบุอายุของคุณ")
+                TextSendMessage(text="กรุณาระบุอายุ")
             )
         elif text == "วิธีการใช้":
-            session["state"] = "initial"
             usage_text = "นี่คือบริการหาช่วงเวลานัดประชุมอัจฉริยะ หากอยากใช้ให้เลือกหรือพิมพ์ \"กรอกข้อมูล Manager\" หากอยากยกเลิกการทำงานในขั้นตอนใดขั้นตอนนึงสามารถพิมพ์ \"ยกเลิก\""
             
             # Send usage info with quick reply to start again
@@ -107,7 +87,11 @@ def handle_message(event):
                 event.reply_token,
                 TextSendMessage(text=usage_text, quick_reply=quick_reply)
             )
+            
+            # Keep state as waiting_initial_choice
+            session["state"] = "waiting_initial_choice"
         else:
+            # If user enters something else while waiting for choice
             send_initial_options(event.reply_token)
     
     # ================= PROFILE FLOW =================
@@ -129,7 +113,7 @@ def handle_message(event):
             line_bot_api.reply_message(
                 event.reply_token,
                 TextSendMessage(
-                    text="กรุณาเลือกประสบการณ์ของคุณ",
+                    text="กรุณาเลือกประสบการณ์",
                     quick_reply=quick_reply
                 )
             )
@@ -156,7 +140,7 @@ def handle_message(event):
             line_bot_api.reply_message(
                 event.reply_token,
                 TextSendMessage(
-                    text="กรุณาเลือกระดับภาษาอังกฤษของคุณ",
+                    text="กรุณาเลือกระดับภาษาอังกฤษ",
                     quick_reply=quick_reply
                 )
             )
@@ -235,7 +219,7 @@ def handle_message(event):
             line_bot_api.reply_message(
                 event.reply_token,
                 TextSendMessage(
-                    text=f"สรุปข้อมูลของคุณ:\n{profile_summary}\n\nต้องการยืนยันข้อมูลหรือไม่?",
+                    text=f"สรุปข้อมูล Manager :\n{profile_summary}\n\nต้องการยืนยันข้อมูลหรือไม่?",
                     quick_reply=quick_reply
                 )
             )
@@ -271,13 +255,21 @@ def handle_message(event):
                 "start_date": datetime.now().strftime("%Y-%m-%d"),
                 "time_period": "7"
             }
-
+            print(profile_json)
             try:
-                # /events/availableMR มั้ง
-                response = requests.post(f"{base_url}/events/availableMR", json=profile_json)
+                print("🚀 กำลังส่ง POST Request...")
+                response = requests.post(f"{base_url}/events/availableMR", json=profile_json, timeout=60)
+                print("✅ ได้รับ response แล้ว")
+                response.raise_for_status()  # ถ้า HTTP status ไม่ใช่ 2xx จะโยน error
                 print("✅ ส่งข้อมูล Manager ไปยัง API แล้ว:", response.status_code)
+            except requests.exceptions.Timeout as err:
+                print(f"❌ Request Timeout: เซิร์ฟเวอร์ไม่ตอบสนองใน 60 วินาที : {err}")
+            except requests.exceptions.SSLError as ssl_err:
+                print(f"❌ SSL Error เกิดขึ้น: {ssl_err}")
+            except requests.exceptions.RequestException as err:
+                print(f"❌ Request Error อื่น ๆ เกิดขึ้น: {err}")
             except Exception as e:
-                print("❌ ส่งข้อมูลล้มเหลว:", e)
+                print(f"❌ เกิด Exception อื่นที่ไม่คาดคิด: {e}")
             # Now proceed to meeting scheduling flow
             line_bot_api.reply_message(
                 event.reply_token,
@@ -326,36 +318,36 @@ def handle_message(event):
             start_time = t.time()
             # Call data API to get available slots
             response = requests.post(
-                # ไม่ไหวแล้ว
+                #TODO: ไม่ไหวแล้ว
                 f"{base_url}/calculate_available_slots",
                 json={"date": session["selected_date"], "date_iso": date_iso},
-                # json = {
-                #       "date": "01/05/2567",
-                #      "date_iso": "2024-05-01"
-                #     }
+                # TODO:json = {
+                # TODO:      "date": "01/05/2567",
+                # TODO:     "date_iso": "2024-05-01"
+                # TODO:    }
                 timeout=3
-                # ส่ง json ด้วย method POST ไป /calculate_available_slots
+                #TODO: ส่ง json ด้วย method POST ไป /calculate_available_slots
                 
             )
             elapsed_time = t.time() - start_time
             print(f"Request took {elapsed_time:.3f} seconds")
-                # ตัวอย่าง json ที่ได้รับ
-                #             {
-                # "available_slots": [
-                #     {
-                #     "date": "01/05/2567",
-                #     "time": "10:00-10:30",
-                #     "participants": ["nonlaneeud@gmail.com", "panupongpr3841@gmail.com"]
-                #     },
-                #     ...
-                # ]
-                # }
+                #TODO: ตัวอย่าง json ที่ได้รับ
+                #TODO:             {
+                #TODO: "available_slots": [
+                #TODO:     {
+                #TODO:     "date": "01/05/2567",
+                #TODO:     "time": "10:00-10:30",
+                #TODO:     "participants": ["nonlaneeud@gmail.com", "panupongpr3841@gmail.com"]
+                # TODO:    },
+                # TODO:    ...
+                #TODO: ]
+                #TODO: }
 
             if response.status_code == 200:
                 available_slots = response.json().get("available_slots", [])
                 session["available_slots"] = available_slots
                 send_time_slots(event.reply_token, available_slots)
-                #เอาไปประมวลผลต่อ send_time_slots ให้กรองสวยๆ และส่งให้ผู้ใช้
+                #TODO:เอาไปประมวลผลต่อ send_time_slots ให้กรองสวยๆ และส่งให้ผู้ใช้
             else:
                 line_bot_api.reply_message(
                     event.reply_token,
@@ -449,17 +441,10 @@ def handle_message(event):
                     "participants": session["selected_slot"]["participants"],
                     "created_by": user_id,
                 }
-<<<<<<< HEAD
-            }
-            start_time = t.time()
-            response = requests.post(
-                f"{base_url}/create_meeting", # api book calendar
-=======
         start_time = t.time()
             #ลุงเอ
         response = requests.post(
-                f"{DATA_API_URL}/create_meeting",
->>>>>>> e6cd4a00c4e2f5248423ba25f37144e227f9766b
+                f"{base_url}/create_meeting",
                 json=meeting_data,
                 timeout=3
             )
@@ -467,7 +452,18 @@ def handle_message(event):
         print(f"Request took {elapsed_time:.3f} seconds")
         if response.status_code == 200:
                 meeting_info = response.json().get("meeting", {})
-                
+                #รูปแบบ json ที่ได้กลับมา
+                # {
+                #     "status": "success",
+                #     "meeting": {
+                #         "date": "01/05/2567",
+                #         "time": "10:00",
+                #         "duration": "30 นาที",
+                #         "participants": [...],
+                #         "created_at": "25/04/2025 23:08:31",
+                #         "created_by": "Uxxxxxxxxxxxx"
+                #     }
+                #     }
                 # Send confirmation message
                 meeting_confirmation = create_meeting_confirmation(meeting_info)
                 line_bot_api.reply_message(
@@ -480,42 +476,6 @@ def handle_message(event):
                     TextSendMessage(text="เกิดข้อผิดพลาดในการสร้างการนัดหมาย")
                 )
             
-<<<<<<< HEAD
-            # Reset state but keep profile information
-            profile_data = {k: session[k] for k in ["age", "exp", "eng_level", "location"] if k in session}
-            session.clear()
-            session.update(profile_data)
-            session["state"] = "initial"
-            session["profile_completed"] = True
-            
-            # Show initial options again
-            send_initial_options(user_id)
-            
-        elif text == "ยกเลิกนัด":
-            line_bot_api.reply_message(
-                event.reply_token,
-                TextSendMessage(text="ยกเลิกการนัดหมายเรียบร้อยแล้ว")
-            )
-            
-            # Reset state but keep profile information
-            profile_data = {k: session[k] for k in ["age", "exp", "eng_level", "location"] if k in session}
-            session.clear()
-            session.update(profile_data)
-            session["state"] = "initial"
-            session["profile_completed"] = True
-            
-            # Show initial options again
-            send_initial_options(user_id)
-        else:
-            line_bot_api.reply_message(
-                event.reply_token,
-                TextSendMessage(text="กรุณาเลือกจากตัวเลือกที่กำหนดให้ (สร้างนัด หรือ ยกเลิกนัด)")
-            )
-    
-    else:
-        # Default response for any other state or text
-        send_initial_options(event.reply_token)
-=======
                 # Reset state but keep profile information
                 profile_data = {k: session[k] for k in ["age", "exp", "eng_level", "location"] if k in session}
                 session.clear()
@@ -528,15 +488,9 @@ def handle_message(event):
                 
 
  
->>>>>>> e6cd4a00c4e2f5248423ba25f37144e227f9766b
 
 def send_initial_options(reply_token_or_user_id):
     """Send initial options with Quick Reply"""
-    session = user_sessions.get(reply_token_or_user_id) if reply_token_or_user_id.startswith("U") else None
-    
-    if session:
-        session["state"] = "waiting_initial_choice"
-    
     items = [
         QuickReplyButton(action=MessageAction(label="กรอกข้อมูล Manager", text="กรอกข้อมูล Manager")),
         QuickReplyButton(action=MessageAction(label="วิธีการใช้", text="วิธีการใช้"))
@@ -553,7 +507,8 @@ def send_initial_options(reply_token_or_user_id):
     if isinstance(reply_token_or_user_id, str) and reply_token_or_user_id.startswith("U"):
         # It's a user_id
         line_bot_api.push_message(reply_token_or_user_id, message)
-        user_sessions[reply_token_or_user_id]["state"] = "waiting_initial_choice"
+        if reply_token_or_user_id in user_sessions:
+            user_sessions[reply_token_or_user_id]["state"] = "waiting_initial_choice"
     else:
         # It's a reply_token
         line_bot_api.reply_message(reply_token_or_user_id, message)
@@ -662,8 +617,5 @@ def create_meeting_confirmation(meeting_info):
     confirmation += "จองบน google calendar และส่งอีเมลเรียบร้อยแล้ว"
     return confirmation
 
-<<<<<<< HEAD
-=======
 # if __name__ == "__main__":
 #     uvicorn.run("line_bot:app", host="localhost", port=8001, reload=True)
->>>>>>> e6cd4a00c4e2f5248423ba25f37144e227f9766b
