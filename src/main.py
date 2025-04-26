@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 import uvicorn
 # Local application
 # from line_bot import *
-from line_bot import *
+from lineBot import *
 from test import *
 from config import *
 from utils.func import *
