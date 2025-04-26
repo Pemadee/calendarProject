@@ -5,6 +5,7 @@ from datetime import datetime, time, timedelta, timezone
 import ssl
 import sys
 # Third-party libraries
+from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -16,7 +17,7 @@ from typing import Optional
 import logging
 # Local application
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
-from src.lineChatbot import *
+from src.line_bot import *
 from src.config import *
 from src.utils.func import *
 from src.models.schemas import *
