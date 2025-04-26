@@ -74,8 +74,14 @@ def handle_message(event):
         send_initial_options(event.reply_token)
         return
     
+<<<<<<< HEAD
     # Initial conversation or reset
     if session["state"] == "initial":
+=======
+    # Initial state or any unknown message
+    if session["state"] == "initial" or text not in ["กรอกข้อมูล Manager", "วิธีการใช้"] and session["state"] not in ["profile_age", "profile_exp", "profile_eng_level", "profile_location", "profile_confirm", "select_date", "select_time_slot", "confirm","meeting_name","meeting_description","meeting_summary"]:
+        session["state"] = "waiting_initial_choice"
+>>>>>>> e6cd4a00c4e2f5248423ba25f37144e227f9766b
         send_initial_options(event.reply_token)
     
     # Handle quick reply selection for initial options
@@ -370,6 +376,7 @@ def handle_message(event):
                 session["selected_slot"] = selected_slot
                 session["state"] = "confirm"
                 
+                
                 # Summary of meeting
                 summary = create_meeting_summary(
                     session["selected_date"],
@@ -379,6 +386,8 @@ def handle_message(event):
                 
                 # Send confirmation message with quick reply
                 send_meeting_confirmation(event.reply_token, summary)
+
+                
             else:
                 line_bot_api.reply_message(
                     event.reply_token,
@@ -394,29 +403,69 @@ def handle_message(event):
     # Meeting confirmation
     elif session["state"] == "confirm":
         if text == "สร้างนัด":
-            # Create meeting by calling data API
-            meeting_data = {
-                "date": session["selected_date"],
-                "time": session["selected_slot"]["time"],
-                "participants": session["selected_slot"]["participants"],
-                "created_by": user_id,
-                # Add user profile data if available
-                "user_profile": {
-                    "age": session.get("age"),
-                    "exp": session.get("exp"),
-                    "eng_level": session.get("eng_level"),
-                    "location": session.get("location")
+            session["state"] = "meeting_name"
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text="กรุณากรอกชื่อการประชุม : ")
+            )
+            
+        elif text == "ยกเลิกนัด":
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text="ยกเลิกการนัดหมายเรียบร้อยแล้ว")
+            )
+            # Reset state but keep profile information
+            profile_data = {k: session[k] for k in ["age", "exp", "eng_level", "location"] if k in session}
+            session.clear()
+            session.update(profile_data)
+            session["state"] = "initial"
+            session["profile_completed"] = True
+            
+            # Show initial options again
+            send_initial_options(user_id)
+        else:
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text="กรุณาเลือกจากตัวเลือกที่กำหนดให้ (สร้างนัด หรือ ยกเลิกนัด)")
+            )
+            
+    elif session["state"] == "meeting_name":
+        session["meeting_name"] = text
+        session["state"] = "meeting_description"
+        print(session["meeting_name"])
+        line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text="กรุณากรอกรายละเอียดการประชุม : ")
+            )
+    elif session["state"] == "meeting_description":
+        session["meeting_description"] = text
+        session["state"] = "meeting_summary"
+        print(session["meeting_description"])
+        meeting_data = {
+                    "name": session["meeting_name"],
+                    "description": session["meeting_description"],
+                    "date": session["selected_date"],
+                    "time": session["selected_slot"]["time"],
+                    "participants": session["selected_slot"]["participants"],
+                    "created_by": user_id,
                 }
+<<<<<<< HEAD
             }
             start_time = t.time()
             response = requests.post(
                 f"{base_url}/create_meeting", # api book calendar
+=======
+        start_time = t.time()
+            #ลุงเอ
+        response = requests.post(
+                f"{DATA_API_URL}/create_meeting",
+>>>>>>> e6cd4a00c4e2f5248423ba25f37144e227f9766b
                 json=meeting_data,
                 timeout=3
             )
-            elapsed_time = t.time() - start_time
-            print(f"Request took {elapsed_time:.3f} seconds")
-            if response.status_code == 200:
+        elapsed_time = t.time() - start_time
+        print(f"Request took {elapsed_time:.3f} seconds")
+        if response.status_code == 200:
                 meeting_info = response.json().get("meeting", {})
                 
                 # Send confirmation message
@@ -425,12 +474,13 @@ def handle_message(event):
                     event.reply_token,
                     TextSendMessage(text=meeting_confirmation)
                 )
-            else:
+        else:
                 line_bot_api.reply_message(
                     event.reply_token,
                     TextSendMessage(text="เกิดข้อผิดพลาดในการสร้างการนัดหมาย")
                 )
             
+<<<<<<< HEAD
             # Reset state but keep profile information
             profile_data = {k: session[k] for k in ["age", "exp", "eng_level", "location"] if k in session}
             session.clear()
@@ -465,6 +515,20 @@ def handle_message(event):
     else:
         # Default response for any other state or text
         send_initial_options(event.reply_token)
+=======
+                # Reset state but keep profile information
+                profile_data = {k: session[k] for k in ["age", "exp", "eng_level", "location"] if k in session}
+                session.clear()
+                session.update(profile_data)
+                session["state"] = "initial"
+                session["profile_completed"] = True
+                
+                # Show initial options again after a delay
+                user_sessions[user_id] = {"state": "initial"}
+                
+
+ 
+>>>>>>> e6cd4a00c4e2f5248423ba25f37144e227f9766b
 
 def send_initial_options(reply_token_or_user_id):
     """Send initial options with Quick Reply"""
@@ -546,6 +610,7 @@ def send_time_slots(reply_token, available_slots):
 
 def send_meeting_confirmation(reply_token, summary):
     """Send meeting confirmation with Quick Reply options"""
+    
     items = [
         QuickReplyButton(action=MessageAction(label="สร้างนัด", text="สร้างนัด")),
         QuickReplyButton(action=MessageAction(label="ยกเลิกนัด", text="ยกเลิกนัด"))
@@ -583,9 +648,11 @@ def create_meeting_summary(date, time_slot, participants):
 def create_meeting_confirmation(meeting_info):
     """Create confirmation message when meeting is successfully created"""
     confirmation = f"✅ สร้างการนัดหมายเรียบร้อยแล้ว\n\n"
+    confirmation += f"📍 ชื่อ : {meeting_info['name']}\n"
     confirmation += f"📅 วันที่ : {meeting_info['date']}\n"
     confirmation += f"⏰ เวลา : {meeting_info['time']}\n"
     confirmation += f"⏱️ ระยะเวลา : {meeting_info['duration']}\n"
+    confirmation += f"📋 รายละเอียด : {meeting_info['description']}\n"
     confirmation += "👥 ผู้เข้าร่วม :\n"
     
     for participant in meeting_info['participants']:
@@ -595,3 +662,8 @@ def create_meeting_confirmation(meeting_info):
     confirmation += "จองบน google calendar และส่งอีเมลเรียบร้อยแล้ว"
     return confirmation
 
+<<<<<<< HEAD
+=======
+# if __name__ == "__main__":
+#     uvicorn.run("line_bot:app", host="localhost", port=8001, reload=True)
+>>>>>>> e6cd4a00c4e2f5248423ba25f37144e227f9766b
