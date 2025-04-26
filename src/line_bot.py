@@ -1,13 +1,16 @@
+import asyncio
 import os
 import sys
+import threading
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request, Response, HTTPException
+from fastapi import BackgroundTasks, FastAPI, Request, Response, HTTPException
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import (
     MessageEvent, TextMessage, TextSendMessage,
     QuickReply, QuickReplyButton, MessageAction
 )
+from apscheduler.schedulers.background import BackgroundScheduler
 import uvicorn
 import requests
 from datetime import datetime, time
@@ -15,11 +18,17 @@ import time as t
 from typing import Dict, List, Any
 
 app = FastAPI()
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
+from api.endpoints import *
 load_dotenv()
 
-line_bot_api = LineBotApi(os.getenv("CHANNEL_ACCESS_TOKEN"))
-handler = WebhookHandler(os.getenv("CHANNEL_SECRET"))
+
+scheduler = BackgroundScheduler()
+scheduler.start()
+
+user_sessions = {}
+base_url = os.getenv("BASE_URL")
+
+
 
 # Available dates for meeting scheduling
 available_dates = ["23/4/2568", "24/4/2568", "25/4/2568", "26/4/2568", "27/4/2568", "28/4/2568", "29/4/2568"]
@@ -198,40 +207,72 @@ def handle_message(event):
                     quick_reply=quick_reply
                 )
             )
-    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     # Location input
     elif session["state"] == "profile_location":
         if text in location_options:
             session["location"] = text
             session["state"] = "profile_confirm"
-            
-            # Create profile summary
+
+            # ส่งสรุปข้อมูล Profile ให้ผู้ใช้
             profile_summary = create_profile_summary(session)
-            
-            # Send confirmation with quick reply
+
             items = [
                 QuickReplyButton(action=MessageAction(label="ยืนยัน", text="ยืนยัน")),
                 QuickReplyButton(action=MessageAction(label="ยกเลิก", text="ยกเลิก"))
             ]
-            
             quick_reply = QuickReply(items=items)
-            
+
             line_bot_api.reply_message(
                 event.reply_token,
                 TextSendMessage(
-                    text=f"สรุปข้อมูล Manager :\n{profile_summary}\n\nต้องการยืนยันข้อมูลหรือไม่?",
+                    text=f"กรุณาตรวจสอบข้อมูลของคุณ:\n{profile_summary}\n\nยืนยันข้อมูลหรือไม่?",
                     quick_reply=quick_reply
                 )
             )
+
         else:
-            # Send location options as quick reply again
             items = [
                 QuickReplyButton(action=MessageAction(label=option, text=option))
                 for option in location_options
             ]
-            
             quick_reply = QuickReply(items=items)
-            
+
             line_bot_api.reply_message(
                 event.reply_token,
                 TextSendMessage(
@@ -239,59 +280,108 @@ def handle_message(event):
                     quick_reply=quick_reply
                 )
             )
-    
-    # Profile confirmation
-    elif session["state"] == "profile_confirm":
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    # ================= MEETING SCHEDULING FLOW =================
+    # Date selection
+    elif session.get("state") == "profile_confirm":
+        print("🔥 Enter profile_confirm branch")
         if text == "ยืนยัน":
-            # Save profile data (you might want to save it to a database here)
-            session["profile_completed"] = True
-            session["state"] = "select_date"
-                # 📦 สร้าง JSON ที่จะส่ง
-            profile_json = {
-                "location": session.get("location"),
-                "english_min": 5 if session.get("eng_level") == "ระดับ 5" else 4,
-                "exp_kind": "strong" if session.get("exp") == "Strong exp" else "non",
-                "age_key": str(session.get("age")),
-                "start_date": datetime.now().strftime("%Y-%m-%d"),
-                "time_period": "7"
-            }
-            print(profile_json)
-            try:
-                print("🚀 กำลังส่ง POST Request...")
-                response = requests.post(f"{base_url}/events/availableMR", json=profile_json, timeout=60)
-                print("✅ ได้รับ response แล้ว")
-                response.raise_for_status()  # ถ้า HTTP status ไม่ใช่ 2xx จะโยน error
-                print("✅ ส่งข้อมูล Manager ไปยัง API แล้ว:", response.status_code)
-            except requests.exceptions.Timeout as err:
-                print(f"❌ Request Timeout: เซิร์ฟเวอร์ไม่ตอบสนองใน 60 วินาที : {err}")
-            except requests.exceptions.SSLError as ssl_err:
-                print(f"❌ SSL Error เกิดขึ้น: {ssl_err}")
-            except requests.exceptions.RequestException as err:
-                print(f"❌ Request Error อื่น ๆ เกิดขึ้น: {err}")
-            except Exception as e:
-                print(f"❌ เกิด Exception อื่นที่ไม่คาดคิด: {e}")
-            # Now proceed to meeting scheduling flow
             line_bot_api.reply_message(
                 event.reply_token,
-                TextSendMessage(text="บันทึกข้อมูลเรียบร้อยแล้ว ต่อไปเป็นการนัดประชุม")
+                TextSendMessage(text="กำลังค้นหาเวลาว่าง โปรดรอสักครู่...")
             )
-            
-            # Send date selection after profile completion
-            send_date_selection(user_id)
+
+            def background_post_and_push(user_id, session_data):
+                try:
+                    profile_json = {
+                        "location": session_data.get("location"),
+                        "english_min": 5 if session_data.get("eng_level") == "ระดับ 5" else 4,
+                        "exp_kind": "strong" if session_data.get("exp") == "Strong exp" else "non",
+                        "age_key": str(session_data.get("age")),
+                        "start_date": datetime.now().strftime("%Y-%m-%d"),
+                        "time_period": "7"
+                    }
+                    # print("🚀 Background Started with data:", profile_json)
+
+                    response = requests.post(
+                        f"{base_url}/events/availableMR",
+                        json=profile_json,
+                        timeout=30
+                    )
+                    response.raise_for_status()
+                    print("✅ POST สำเร็จ:", response.json())
+
+                    line_bot_api.push_message(
+                        user_id,
+                        TextSendMessage(text="บันทึกข้อมูลเรียบร้อยแล้ว ต่อไปเป็นการนัดประชุม")
+                    )
+                    send_date_selection(user_id)
+
+                except Exception as e:
+                    print(f"❌ Background Error: {e}")
+                    line_bot_api.push_message(
+                        user_id,
+                        TextSendMessage(text="❗ เกิดข้อผิดพลาด กรุณาลองใหม่ภายหลัง")
+                    )
+
+            scheduler.add_job(
+                func=background_post_and_push,
+                args=[user_id, session.copy()],
+                trigger="date",
+                run_date=datetime.now() + timedelta(seconds=2)
+            )
+
         elif text == "ยกเลิก":
-            # Reset session and go back to initial state
             session.clear()
             session["state"] = "initial"
             send_initial_options(event.reply_token)
+
         else:
-            # Send confirmation options again
             items = [
                 QuickReplyButton(action=MessageAction(label="ยืนยัน", text="ยืนยัน")),
                 QuickReplyButton(action=MessageAction(label="ยกเลิก", text="ยกเลิก"))
             ]
-            
             quick_reply = QuickReply(items=items)
-            
+
             line_bot_api.reply_message(
                 event.reply_token,
                 TextSendMessage(
@@ -299,66 +389,10 @@ def handle_message(event):
                     quick_reply=quick_reply
                 )
             )
-    
-    # ================= MEETING SCHEDULING FLOW =================
-    # Date selection
-    elif session["state"] == "select_date":
-        if text in available_dates:
-            line_bot_api.push_message(
-                user_id,
-                TextSendMessage(text="กำลังประมวลผลหาช่วงเวลาที่ว่าง...")
-            )          
-            session["selected_date"] = text
-            session["state"] = "select_time_slot"
-            
-            # แปลงวันที่จากรูปแบบไทย (วว/ดด/25XX) เป็นรูปแบบสากล (YYYY-MM-DD)
-            day, month, year = text.split('/')
-            year_ce = int(year) - 543  # แปลงจาก พ.ศ. เป็น ค.ศ.
-            date_iso = f"{year_ce}-{month.zfill(2)}-{day.zfill(2)}"
-            start_time = t.time()
-            # Call data API to get available slots
-            response = requests.post(
-                #TODO: ไม่ไหวแล้ว
-                f"{base_url}/calculate_available_slots",
-                json={"date": session["selected_date"], "date_iso": date_iso},
-                # TODO:json = {
-                # TODO:      "date": "01/05/2567",
-                # TODO:     "date_iso": "2024-05-01"
-                # TODO:    }
-                timeout=3
-                #TODO: ส่ง json ด้วย method POST ไป /calculate_available_slots
-                
-            )
-            elapsed_time = t.time() - start_time
-            print(f"Request took {elapsed_time:.3f} seconds")
-                #TODO: ตัวอย่าง json ที่ได้รับ
-                #TODO:             {
-                #TODO: "available_slots": [
-                #TODO:     {
-                #TODO:     "date": "01/05/2567",
-                #TODO:     "time": "10:00-10:30",
-                #TODO:     "participants": ["nonlaneeud@gmail.com", "panupongpr3841@gmail.com"]
-                # TODO:    },
-                # TODO:    ...
-                #TODO: ]
-                #TODO: }
+      
 
-            if response.status_code == 200:
-                available_slots = response.json().get("available_slots", [])
-                session["available_slots"] = available_slots
-                send_time_slots(event.reply_token, available_slots)
-                #TODO:เอาไปประมวลผลต่อ send_time_slots ให้กรองสวยๆ และส่งให้ผู้ใช้
-            else:
-                line_bot_api.reply_message(
-                    event.reply_token,
-                    TextSendMessage(text="เกิดข้อผิดพลาดในการดึงข้อมูลช่วงเวลาที่ว่าง")
-                )
-        else:
-            line_bot_api.reply_message(
-                event.reply_token,
-                TextSendMessage(text="กรุณาเลือกวันที่จากตัวเลือกที่กำหนดให้")
-            )
-    
+
+
     # Time slot selection
     elif session["state"] == "select_time_slot":
         try:
@@ -512,6 +546,14 @@ def send_initial_options(reply_token_or_user_id):
     else:
         # It's a reply_token
         line_bot_api.reply_message(reply_token_or_user_id, message)
+
+@handler.add(MessageEvent)
+def catch_all_message(event):
+    print("🛎 Event received:", event)
+
+    # แล้วดูว่า event.message.type เป็นอะไร
+    if hasattr(event, 'message') and hasattr(event.message, 'type'):
+        print("🛎 Event message type:", event.message.type)
 
 def send_date_selection(reply_token_or_user_id):
     """Send Quick Reply for date selection"""
