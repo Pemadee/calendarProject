@@ -13,7 +13,6 @@ from googleapiclient.discovery import build
 import pandas as pd
 # Local application
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
-from src.lineChatbot import *
 from src.config import *
 
 

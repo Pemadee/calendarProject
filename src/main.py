@@ -4,7 +4,7 @@ import os
 from dotenv import load_dotenv
 import uvicorn
 # Local application
-from lineChatbot import *
+from line_bot import *
 from test import *
 from config import *
 from utils.func import *

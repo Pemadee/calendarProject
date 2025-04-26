@@ -1,4 +1,5 @@
 import os
+import sys
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request, Response, HTTPException
 from linebot import LineBotApi, WebhookHandler
@@ -14,11 +15,11 @@ import time as t
 from typing import Dict, List, Any
 
 app = FastAPI()
-
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 load_dotenv()
 
-line_bot_api = LineBotApi(os.getenv("LINE_CHANNEL_ACCESS_TOKEN"))
-handler = WebhookHandler(os.getenv("LINE_CHANNEL_SECRET"))
+line_bot_api = LineBotApi(os.getenv("CHANNEL_ACCESS_TOKEN"))
+handler = WebhookHandler(os.getenv("CHANNEL_SECRET"))
 
 # Available dates for meeting scheduling
 available_dates = ["23/4/2568", "24/4/2568", "25/4/2568", "26/4/2568", "27/4/2568", "28/4/2568", "29/4/2568"]
@@ -36,23 +37,23 @@ location_options = ["Silom", "Asoke", "Phuket", "Pattaya", "Samui", "Huahin", "C
 user_sessions = {}
 
 # Configuration for data API service
-DATA_API_URL = "http://localhost:8000"  # Data service URL
+base_url = os.getenv("BASE_URL")# Data service URL
 
 @app.get("/")
 def read_root():
     return {"message": "Hello, Line!"}
 
-@app.post("/callback")
-async def callback(request: Request):
-    signature = request.headers.get('X-Line-Signature', '')
-    body = await request.body()
+# @app.post("/callback")
+# async def callback(request: Request):
+#     signature = request.headers.get('X-Line-Signature', '')
+#     body = await request.body()
     
-    try:
-        handler.handle(body.decode('utf-8'), signature)
-    except InvalidSignatureError:
-        raise HTTPException(status_code=400, detail="Invalid signature")
+#     try:
+#         handler.handle(body.decode('utf-8'), signature)
+#     except InvalidSignatureError:
+#         raise HTTPException(status_code=400, detail="Invalid signature")
     
-    return Response(content="OK", media_type="text/plain")
+#     return Response(content="OK", media_type="text/plain")
 
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
@@ -255,7 +256,22 @@ def handle_message(event):
             # Save profile data (you might want to save it to a database here)
             session["profile_completed"] = True
             session["state"] = "select_date"
-            
+                # 📦 สร้าง JSON ที่จะส่ง
+            profile_json = {
+                "location": session.get("location"),
+                "english_min": 5 if session.get("eng_level") == "ระดับ 5" else 4,
+                "exp_kind": "strong" if session.get("exp") == "Strong exp" else "non",
+                "age_key": str(session.get("age")),
+                "start_date": datetime.now().strftime("%Y-%m-%d"),
+                "time_period": "7"
+            }
+
+            try:
+                # /events/availableMR มั้ง
+                response = requests.post(f"{base_url}/events/availableMR", json=profile_json)
+                print("✅ ส่งข้อมูล Manager ไปยัง API แล้ว:", response.status_code)
+            except Exception as e:
+                print("❌ ส่งข้อมูลล้มเหลว:", e)
             # Now proceed to meeting scheduling flow
             line_bot_api.reply_message(
                 event.reply_token,
@@ -304,16 +320,36 @@ def handle_message(event):
             start_time = t.time()
             # Call data API to get available slots
             response = requests.post(
-                f"{DATA_API_URL}/calculate_available_slots",
+                # ไม่ไหวแล้ว
+                f"{base_url}/calculate_available_slots",
                 json={"date": session["selected_date"], "date_iso": date_iso},
+                # json = {
+                #       "date": "01/05/2567",
+                #      "date_iso": "2024-05-01"
+                #     }
                 timeout=3
+                # ส่ง json ด้วย method POST ไป /calculate_available_slots
+                
             )
             elapsed_time = t.time() - start_time
             print(f"Request took {elapsed_time:.3f} seconds")
+                # ตัวอย่าง json ที่ได้รับ
+                #             {
+                # "available_slots": [
+                #     {
+                #     "date": "01/05/2567",
+                #     "time": "10:00-10:30",
+                #     "participants": ["nonlaneeud@gmail.com", "panupongpr3841@gmail.com"]
+                #     },
+                #     ...
+                # ]
+                # }
+
             if response.status_code == 200:
                 available_slots = response.json().get("available_slots", [])
                 session["available_slots"] = available_slots
                 send_time_slots(event.reply_token, available_slots)
+                #เอาไปประมวลผลต่อ send_time_slots ให้กรองสวยๆ และส่งให้ผู้ใช้
             else:
                 line_bot_api.reply_message(
                     event.reply_token,
@@ -374,7 +410,7 @@ def handle_message(event):
             }
             start_time = t.time()
             response = requests.post(
-                f"{DATA_API_URL}/create_meeting", # api book calendar
+                f"{base_url}/create_meeting", # api book calendar
                 json=meeting_data,
                 timeout=3
             )
@@ -559,5 +595,3 @@ def create_meeting_confirmation(meeting_info):
     confirmation += "จองบน google calendar และส่งอีเมลเรียบร้อยแล้ว"
     return confirmation
 
-if __name__ == "__main__":
-    uvicorn.run("line_bot:app", host="localhost", port=8001, reload=True)
