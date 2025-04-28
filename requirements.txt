@@ -12,3 +12,6 @@ google-auth-oauthlib
 python-multipart
 aiohttp
 pytz
+aiofiles
+apscheduler
+openpyxl
