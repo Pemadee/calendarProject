@@ -16,7 +16,7 @@ base_url = os.getenv("BASE_URL_NGROK")
 
 def send_book_meeting(meeting_result):
     try:
-        base_url = {base_url}
+        
         print("🚀 POST ข้อมูล:", meeting_result.dict())
         print(base_url)
         response = requests.post(

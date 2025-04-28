@@ -17,6 +17,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from handler_line import send_book_meeting
 from api.endpoints import *
 from models.schemas import BulkEventRequest
+from urllib.parse import quote
 
 app = FastAPI()
 
@@ -30,6 +31,11 @@ user_sessions = {}
 # Configuration for data API service
 base_url = os.getenv("BASE_URL_NGROK")
 
+def validate_email(email):
+    """Simple email validation."""
+    import re
+    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    return re.match(pattern, email) is not None
 
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
@@ -64,6 +70,12 @@ def handle_message(event):
                 event.reply_token,
                 TextSendMessage(text="กรุณาระบุอายุ")
             )
+        elif text == "เพิ่มอีเมล":  # เพิ่มเงื่อนไขนี้
+            session["state"] = "enter_email"
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text="กรุณากรอกอีเมลที่ต้องการเพิ่มเข้าระบบ:")
+            )
         elif text == "วิธีการใช้":
             usage_text = "นี่คือบริการหาช่วงเวลานัดประชุมอัจฉริยะ หากอยากใช้ให้เลือกหรือพิมพ์ \"กรอกข้อมูล Manager\" หากอยากยกเลิกการทำงานในขั้นตอนใดขั้นตอนนึงสามารถพิมพ์ \"ยกเลิก\""
             
@@ -87,6 +99,86 @@ def handle_message(event):
     
     # ================= PROFILE FLOW =================
     # Age input
+    # ส่วนจัดการการเพิ่มอีเมล
+    elif session["state"] == "enter_email":
+        email = text.strip()
+        # Validate email format
+        if not validate_email(email):
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text="รูปแบบอีเมลไม่ถูกต้อง กรุณากรอกอีเมลใหม่")
+            )
+            return
+        
+        session["email"] = email
+        session["state"] = "confirm_email"
+        
+        # สร้าง quick reply สำหรับยืนยันอีเมล
+        items = [
+            QuickReplyButton(action=MessageAction(label="✅ ยืนยัน", text="ยืนยันอีเมล")),
+            QuickReplyButton(action=MessageAction(label="❌ ยกเลิก", text="ยกเลิก"))
+        ]
+        
+        quick_reply = QuickReply(items=items)
+        
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(
+                text=f"ยืนยันการเพิ่มอีเมล: {email}?",
+                quick_reply=quick_reply
+            )
+        )
+
+    elif session["state"] == "confirm_email":
+        if text == "ยืนยันอีเมล":
+            email = session.get("email", "")
+            from urllib.parse import quote
+            encoded_email = quote(email)
+            
+            # สร้าง URL สำหรับการยืนยัน
+            api_url = f"https://0bf4-49-228-96-87.ngrok-free.app/{encoded_email}"
+            
+            # สร้าง quick reply สำหรับเมื่อเข้าสู่ระบบเรียบร้อย
+            items = [
+                QuickReplyButton(action=MessageAction(label="เข้าสู่ระบบเรียบร้อย", text="เข้าสู่ระบบเรียบร้อย"))
+            ]
+            
+            quick_reply = QuickReply(items=items)
+            
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(
+                    text=f"กรุณาเข้าลิงก์เพื่อยันยันการเข้าสู่ระบบ\n\n**เมื่อเข้าสู่ระบบเสร็จสิ้นกรุณากดด้านล่าง \"เข้าสู่ระบบเรียบร้อย\"**\n\n{api_url}",
+                    quick_reply=quick_reply
+                )
+            )
+            session["state"] = "waiting_login_confirmation"
+            
+        elif text == "ยกเลิก":
+            # Reset state and go back to initial options
+            session.clear()
+            session["state"] = "initial"
+            send_initial_options(event.reply_token)
+
+    elif session["state"] == "waiting_login_confirmation":
+        if text == "เข้าสู่ระบบเรียบร้อย":
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text="ขอบคุณสำหรับการเพิ่มอีเมลและเข้าสู่ระบบ! คุณสามารถใช้งานระบบได้แล้ว")
+            )
+            # Reset state and go back to initial options
+            session.clear()
+            session["state"] = "initial"
+            
+            # Show initial options again with push message
+            def send_initial_options_later():
+                send_initial_options(user_id)
+                
+            scheduler.add_job(
+                func=send_initial_options_later,
+                trigger="date",
+                run_date=datetime.now() + timedelta(seconds=1)
+            )
     elif session["state"] == "profile_age":
         try:
             age = int(text)
@@ -582,6 +674,7 @@ def send_initial_options(reply_token_or_user_id):
     """Send initial options with Quick Reply"""
     items = [
         QuickReplyButton(action=MessageAction(label="กรอกข้อมูล Manager", text="กรอกข้อมูล Manager")),
+        QuickReplyButton(action=MessageAction(label="เพิ่มอีเมล", text="เพิ่มอีเมล")),  # เพิ่มปุ่มนี้
         QuickReplyButton(action=MessageAction(label="วิธีการใช้", text="วิธีการใช้"))
     ]
     
