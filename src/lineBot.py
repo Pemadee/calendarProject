@@ -279,6 +279,7 @@ def handle_message(event):
                     
 
                     if response.status_code == 200:
+                        session["state"] = "select_date"
                         # เก็บข้อมูลที่ได้รับจาก API ลงใน session
                         user_sessions[user_id]["state"] = "select_date"  # ต้องแก้ไขเป็น user_sessions[user_id] แทน session
                         user_sessions[user_id]["available_time_slots"] = response.json().get("available_time_slots", [])
