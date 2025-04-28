@@ -1,4 +1,5 @@
 import os
+import threading
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request, Response, HTTPException
 from linebot import LineBotApi, WebhookHandler
@@ -13,8 +14,9 @@ from datetime import datetime, time, timedelta
 import time as t 
 from typing import Dict, List, Any
 from apscheduler.schedulers.background import BackgroundScheduler
-
+from handler_line import send_book_meeting
 from api.endpoints import *
+from models.schemas import BulkEventRequest
 
 app = FastAPI()
 
@@ -26,8 +28,7 @@ scheduler.start()
 user_sessions = {}
 
 # Configuration for data API service
-base_url = os.getenv("BASE_URL")# Data service URL
-
+base_url = os.getenv("BASE_URL_NGROK")
 
 
 @handler.add(MessageEvent, message=TextMessage)
@@ -50,7 +51,7 @@ def handle_message(event):
         return
     
     # Initial state or any unknown message
-    if session["state"] == "initial" or text not in ["กรอกข้อมูล Manager", "วิธีการใช้"] and session["state"] not in ["profile_age", "profile_exp", "profile_eng_level", "profile_location", "profile_confirm", "select_date", "select_time_slot", "select_pair", "confirm", "meeting_name", "meeting_description", "meeting_summary"]:
+    if session["state"] == "initial" or (text not in ["กรอกข้อมูล Manager", "วิธีการใช้"] and session["state"] not in ["waiting_initial_choice", "profile_age", "profile_exp", "profile_eng_level", "profile_location", "profile_confirm", "select_date", "select_time_slot", "select_pair", "confirm", "meeting_name", "meeting_description", "meeting_summary"]):
         session["state"] = "waiting_initial_choice"
         send_initial_options(event.reply_token)
         return
@@ -256,6 +257,7 @@ def handle_message(event):
                 TextSendMessage(text="กำลังค้นหาเวลาว่าง โปรดรอสักครู่...")
             )
             def background_post_and_push(user_id, session_data):
+                
                 try:
                     profile_json = {
                         "location": session_data.get("location"),
@@ -273,12 +275,13 @@ def handle_message(event):
                         timeout=30
                     )
                     response.raise_for_status()
-                    print("✅ POST สำเร็จ:", response.json())
+                    # print("✅ POST สำเร็จ:", response.json())
                     
 
                     if response.status_code == 200:
                         # เก็บข้อมูลที่ได้รับจาก API ลงใน session
-                        session["available_time_slots"] = response.json().get("available_time_slots", [])
+                        user_sessions[user_id]["state"] = "select_date"  # ต้องแก้ไขเป็น user_sessions[user_id] แทน session
+                        user_sessions[user_id]["available_time_slots"] = response.json().get("available_time_slots", [])
                         
                         # แสดงข้อความยืนยันการบันทึกข้อมูล
                         line_bot_api.push_message(
@@ -332,7 +335,7 @@ def handle_message(event):
             )
     
     # ================= MEETING SCHEDULING FLOW =================
-    # Date selection
+# ในฟังก์ชัน handle_message, ส่วนของ select_date (ประมาณบรรทัดที่ 389)
     elif session["state"] == "select_date":
         # ตรวจสอบรูปแบบวันที่ที่ผู้ใช้เลือก (เช่น "27/4/2568")
         selected_date = None
@@ -358,17 +361,29 @@ def handle_message(event):
                     pass
         
         if selected_date:
-            line_bot_api.push_message(
-                user_id,
-                TextSendMessage(text="กำลังประมวลผลหาช่วงเวลาที่ว่าง...")
-            )          
-            session["state"] = "select_time_slot"
+            # พิมพ์ข้อความเพื่อดีบัก
+            print(f"✅ เลือกวันที่: {session['selected_date']}")
+            
+            session["state"] = "select_time_slot"  # ตั้งค่าสถานะก่อนพิมพ์ข้อความ
+            
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text=f"คุณเลือกวันที่ {session['selected_date']} กำลังค้นหาช่วงเวลาที่ว่าง...")
+            )
             
             # นำข้อมูลช่วงเวลาที่ว่างในวันที่เลือกมาแสดง
             time_slots = selected_date.get("time_slots", [])
             session["time_slots"] = time_slots
             
-            send_time_slots(event.reply_token, time_slots, session["selected_date"])
+            # ส่งข้อความเลือก time slots ด้วย push message หลังจาก reply message
+            def send_time_slots_later():
+                send_time_slots(user_id, time_slots, session["selected_date"])
+                
+            scheduler.add_job(
+                func=send_time_slots_later,
+                trigger="date",
+                run_date=datetime.now() + timedelta(seconds=1)
+            )
         else:
             # ถ้าผู้ใช้ไม่ได้เลือกวันที่จากรายการ ให้แสดงรายการอีกครั้ง
             items = [
@@ -410,12 +425,41 @@ def handle_message(event):
             )
     
     # Pair selection
+# Pair selection
     elif session["state"] == "select_pair":
         try:
             pair_number = int(text.strip("()"))
             if 1 <= pair_number <= len(session["selected_time_slot"]["pair_details"]):
                 selected_pair = session["selected_time_slot"]["pair_details"][pair_number - 1]
                 session["selected_pair"] = selected_pair
+                
+                # เพิ่มการเก็บอีเมลทั้งสองคนเข้าไปในลิสต์
+                session["emails"] = [
+                    selected_pair["manager"]["email"],
+                    selected_pair["recruiter"]["email"]
+                ]
+                print(f"✅ Collected emails: {session['emails']}")
+                
+                # จัดการวันที่และเวลาให้อยู่ในรูปแบบที่ต้องการ
+                # แปลงวันที่จากรูปแบบ dd/mm/yyyy (Thai) เป็น yyyy-mm-dd (ISO)
+                date_parts = session["selected_date"].split("/")
+                if len(date_parts) == 3:
+                    day, month, thai_year = date_parts
+                    year = int(thai_year) - 543  # แปลงจาก พ.ศ. เป็น ค.ศ.
+                    iso_date = f"{year}-{month.zfill(2)}-{day.zfill(2)}"
+                else:
+                    # ในกรณีที่ session["selected_date_iso"] มีอยู่แล้ว
+                    iso_date = session.get("selected_date_iso", "")
+                
+                # แยกช่วงเวลาเริ่มต้นและสิ้นสุด
+                time_range = session["selected_time_slot"]["time"]
+                start_time, end_time = time_range.split("-")
+                
+                # สร้างรูปแบบ ISO datetime และเก็บใน session
+                session["start_time"] = f"{iso_date}T{start_time}:00+07:00"
+                session["end_time"] = f"{iso_date}T{end_time}:00+07:00"
+                print(f"✅ Start time: {session['start_time']}, End time: {session['end_time']}")
+                
                 session["state"] = "confirm"
                 
                 # สรุปรายละเอียดการนัดหมาย
@@ -495,6 +539,18 @@ def handle_message(event):
             "created_at": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
             "created_by": user_id
         }
+        meeting_result = BulkEventRequest(
+                user_emails=session["emails"],
+                summary=session["meeting_name"],
+                description=session["meeting_description"],
+                location= f"{session.get('location')}",
+                start_time=session["start_time"],
+                end_time=session["end_time"],
+                attendees=[]
+        )
+        print(session.get('location'))  # เช็กค่า location ที่ได้จาก session
+        print(session.get('start_time'))  # เช็ก start_time
+        print(session.get('end_time'))    # เช็ก end_time
         
         # สร้างข้อความยืนยันการนัดหมาย
         meeting_confirmation = create_meeting_confirmation(meeting_info)
@@ -504,7 +560,8 @@ def handle_message(event):
             event.reply_token,
             TextSendMessage(text=meeting_confirmation)
         )
-        
+        #ส่งข้อมูลให้ไป api ที่ทำการ book ใน google calendar ผู้ใช้ตาม meeting_result ที่ส่งไป และส่งอีเมลให้ manager recruiter
+        threading.Thread(target=send_book_meeting, args=(meeting_result,)).start()
         # รีเซ็ตสถานะแต่เก็บข้อมูลโปรไฟล์
         profile_data = {k: session[k] for k in ["age", "exp", "eng_level", "location", "available_time_slots"] if k in session}
         session.clear()
@@ -587,35 +644,38 @@ def send_date_selection(reply_token_or_user_id, available_time_slots):
         # It's a reply_token
         line_bot_api.reply_message(reply_token_or_user_id, message)
 
-def send_time_slots(reply_token, time_slots, selected_date):
+def send_time_slots(reply_token_or_user_id, time_slots, selected_date):
     """Send available time slots"""
     # Create message with available time slots
     slot_texts = []
 
-    for i, slot in enumerate(time_slots, start=1):
-        # แสดงจำนวนคู่ที่ว่างในช่วงเวลานี้
+    for i, slot in enumerate(time_slots[:12], start=1):  # ตัดไว้ที่ 12 อันก่อนเลย
         pairs_text = "\n   " + "\n   ".join([f"👥{pair}" for pair in slot["available_pairs"]])
         slot_text = f"{i}. เวลา {slot['time']}{pairs_text}"
         slot_texts.append(slot_text)
 
     message_text = f"กรุณาเลือกช่วงเวลาที่ต้องการ:\nวันที่ : {selected_date}\n" + "\n".join(slot_texts)
-    
-    # แสดง quick reply สำหรับเลือกช่วงเวลา (สูงสุด 13 รายการตามข้อจำกัดของ Line)
+
+    # สร้างปุ่ม quick reply สำหรับ 12 slots
     items = [
         QuickReplyButton(action=MessageAction(label=f"({i})", text=f"({i})"))
-        for i in range(1, min(len(time_slots) + 1, 14))
+        for i in range(1, len(slot_texts) + 1)
     ]
-    
-    # เพิ่มตัวเลือกยกเลิก
-    items.append(QuickReplyButton(action=MessageAction(label="ยกเลิก", text="ยกเลิก")))
-    
-    quick_reply = QuickReply(items=items)
-    
-    line_bot_api.reply_message(
-        reply_token,
-        TextSendMessage(text=message_text, quick_reply=quick_reply)
-    )
 
+    # เพิ่มปุ่ม 'ยกเลิก' เป็นปุ่มที่ 13
+    items.append(QuickReplyButton(action=MessageAction(label="ยกเลิก", text="ยกเลิก")))
+
+    quick_reply = QuickReply(items=items)
+
+    message = TextSendMessage(text=message_text, quick_reply=quick_reply)
+
+    # Handle both reply_token and user_id
+    if isinstance(reply_token_or_user_id, str) and reply_token_or_user_id.startswith("U"):
+        line_bot_api.push_message(reply_token_or_user_id, message)
+    else:
+        line_bot_api.reply_message(reply_token_or_user_id, message)
+
+        
 def send_pair_selection(reply_token, time_slot):
     """Send Manager-Recruiter pairs for selection"""
     # Create message with available pairs
