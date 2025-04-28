@@ -9,6 +9,7 @@ from linebot.models import (
     MessageEvent, TextMessage, TextSendMessage,
     QuickReply, QuickReplyButton, MessageAction
 )
+import urllib
 import uvicorn
 import requests
 from datetime import datetime, time, timedelta
@@ -18,6 +19,9 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from handler_line import send_book_meeting
 from api.endpoints import *
 from models.schemas import BulkEventRequest
+from linebot.models import TemplateSendMessage, ButtonsTemplate, URIAction
+from linebot.models import FlexSendMessage
+
 
 app = FastAPI()
 
@@ -91,6 +95,9 @@ def handle_message(event):
         else:
             # If user enters something else while waiting for choice
             send_initial_options(event.reply_token)
+
+
+
     elif session["state"] == "login_email":  
         def background_login_and_push(user_id, user_email):
             """ดึง events ใน background แล้ว push กลับหาผู้ใช้"""
@@ -98,15 +105,29 @@ def handle_message(event):
                 resp = requests.get(
                     f"{base_url}/events/{user_email}",
                     allow_redirects=False,
-                    timeout=30                # ยืด timeout ให้เยอะขึ้น
+                    timeout=30
                 )
 
                 # ===== Auth required =====
                 if resp.status_code in (302, 307) and "location" in resp.headers:
-                    auth_url = resp.headers["location"]
+                    original_auth_url = resp.headers["location"]
+    
+                    # เพิ่มพารามิเตอร์ mobile=true
+                    if "?" in original_auth_url:
+                        auth_url = original_auth_url + "&mobile=true"
+                    else:
+                        auth_url = original_auth_url + "?mobile=true"
+                    
+                    message_text = (
+                        "กรุณาคลิกที่ลิงก์ด้านล่างเพื่อยืนยันสิทธิ์การเข้าถึง Google Calendar\n\n"
+                        "📱 หากใช้มือถือและเกิดข้อผิดพลาด 403:\n"
+                        "กดลิงก์ค้างไว้แล้วเลือก 'เปิดในเบราว์เซอร์ภายนอก'\n\n"
+                        f"{auth_url}"
+                    )
+                    
                     line_bot_api.push_message(
                         user_id,
-                        TextSendMessage(text=f"กรุณาคลิกยืนยันสิทธิ์ที่ลิงก์นี้\n{auth_url}")
+                        TextSendMessage(text=message_text)
                     )
                     return
 
@@ -135,7 +156,7 @@ def handle_message(event):
                     user_id,
                     TextSendMessage(text=f"เกิดข้อผิดพลาดในการดึงปฏิทิน: {e}")
                 )
-                       
+
         email_pattern = r"^[\w\.-]+@[\w\.-]+\.\w{2,}$"
         if re.match(email_pattern, text):
             user_email = text.strip()
@@ -162,7 +183,86 @@ def handle_message(event):
                 event.reply_token,
                 TextSendMessage(text="รูปแบบอีเมลไม่ถูกต้อง กรุณาลองใหม่")
             )
-           
+            def background_login_and_push(user_id, user_email):
+                """ดึง events ใน background แล้ว push กลับหาผู้ใช้"""
+                try:
+                    resp = requests.get(
+                        f"{base_url}/events/{user_email}",
+                        allow_redirects=False,
+                        timeout=30                # ยืด timeout ให้เยอะขึ้น
+                    )
+
+                    # ===== Auth required =====
+                    if resp.status_code in (302, 307) and "location" in resp.headers:
+                        auth_url = resp.headers["location"]
+                        line_bot_api.push_message(
+                            user_id,
+                            TextSendMessage(text=f"กรุณาคลิกยืนยันสิทธิ์ที่ลิงก์นี้\n{auth_url}")
+                        )
+                        return
+                    # ===== Got events =====
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        events = data.get("events", [])
+                        if events:
+                            lines = [f"📅 ปฏิทินของ {user_email} (7 วันถัดไป)"]
+                            for ev in events[:10]:
+                                lines.append(f"• {ev['start']} ▶ {ev['summary']}")
+                            reply_text = "\n".join(lines)
+                        else:
+                            reply_text = f"ไม่พบกิจกรรม 7 วันถัดไปของ {user_email}"
+
+                        line_bot_api.push_message(user_id, TextSendMessage(text=f"✅ Login สำเร็จ\n\n{reply_text}"))
+                    else:
+                        line_bot_api.push_message(
+                            user_id,
+                            TextSendMessage(text=f"เกิดข้อผิดพลาด (status {resp.status_code}) กรุณาลองใหม่ภายหลัง")
+                        )
+
+                except Exception as e:
+                    print("❌ login error:", e)
+                    line_bot_api.push_message(
+                        user_id,
+                        TextSendMessage(text=f"เกิดข้อผิดพลาดในการดึงปฏิทิน: {e}")
+                    )
+                        
+            email_pattern = r"^[\w\.-]+@[\w\.-]+\.\w{2,}$"
+            if re.match(email_pattern, text):
+                user_email = text.strip()
+
+                # ตอบกลับทันที
+                line_bot_api.reply_message(
+                    event.reply_token,
+                    TextSendMessage(text="กำลังตรวจสอบสิทธิ์และดึงข้อมูลปฏิทิน โปรดรอสักครู่...")
+                )
+
+                # เรียกทำงานฉากหลัง
+                scheduler.add_job(
+                    func=background_login_and_push,
+                    args=[user_id, user_email],
+                    trigger="date",
+                    run_date=datetime.now() + timedelta(seconds=1)
+                )
+
+                # reset session
+                session.clear()
+                session["state"] = "initial"
+            else:
+                line_bot_api.reply_message(
+                    event.reply_token,
+                    TextSendMessage(text="รูปแบบอีเมลไม่ถูกต้อง กรุณาลองใหม่")
+                )
+
+
+
+
+
+
+
+
+
+
+
     # ================= PROFILE FLOW =================
     # Age input
     elif session["state"] == "profile_age":
