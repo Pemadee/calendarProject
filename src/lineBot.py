@@ -1,4 +1,5 @@
 import os
+import re
 import threading
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request, Response, HTTPException
@@ -51,7 +52,7 @@ def handle_message(event):
         return
     
     # Initial state or any unknown message
-    if session["state"] == "initial" or (text not in ["กรอกข้อมูล Manager", "วิธีการใช้"] and session["state"] not in ["waiting_initial_choice", "profile_age", "profile_exp", "profile_eng_level", "profile_location", "profile_confirm", "select_date", "select_time_slot", "select_pair", "confirm", "meeting_name", "meeting_description", "meeting_summary"]):
+    if session["state"] == "initial" or (text not in ["กรอกข้อมูล Manager", "วิธีการใช้"] and session["state"] not in ["waiting_initial_choice", "profile_age", "profile_exp", "profile_eng_level", "profile_location", "profile_confirm", "select_date", "select_time_slot", "select_pair", "confirm", "meeting_name", "meeting_description", "meeting_summary", "login_email"]):
         session["state"] = "waiting_initial_choice"
         send_initial_options(event.reply_token)
         return
@@ -81,10 +82,87 @@ def handle_message(event):
             
             # Keep state as waiting_initial_choice
             session["state"] = "waiting_initial_choice"
+        elif text == "login(สำหรับ Manager & Recruiter)":          
+            session["state"] = "login_email"
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text="กรุณากรอกอีเมลของคุณ (example@company.com)")
+            )
         else:
             # If user enters something else while waiting for choice
             send_initial_options(event.reply_token)
-    
+    elif session["state"] == "login_email":  
+        def background_login_and_push(user_id, user_email):
+            """ดึง events ใน background แล้ว push กลับหาผู้ใช้"""
+            try:
+                resp = requests.get(
+                    f"{base_url}/events/{user_email}",
+                    allow_redirects=False,
+                    timeout=30                # ยืด timeout ให้เยอะขึ้น
+                )
+
+                # ===== Auth required =====
+                if resp.status_code in (302, 307) and "location" in resp.headers:
+                    auth_url = resp.headers["location"]
+                    line_bot_api.push_message(
+                        user_id,
+                        TextSendMessage(text=f"กรุณาคลิกยืนยันสิทธิ์ที่ลิงก์นี้\n{auth_url}")
+                    )
+                    return
+
+                # ===== Got events =====
+                if resp.status_code == 200:
+                    data = resp.json()
+                    events = data.get("events", [])
+                    if events:
+                        lines = [f"📅 ปฏิทินของ {user_email} (7 วันถัดไป)"]
+                        for ev in events[:10]:
+                            lines.append(f"• {ev['start']} ▶ {ev['summary']}")
+                        reply_text = "\n".join(lines)
+                    else:
+                        reply_text = f"ไม่พบกิจกรรม 7 วันถัดไปของ {user_email}"
+
+                    line_bot_api.push_message(user_id, TextSendMessage(text=f"✅ Login สำเร็จ\n\n{reply_text}"))
+                else:
+                    line_bot_api.push_message(
+                        user_id,
+                        TextSendMessage(text=f"เกิดข้อผิดพลาด (status {resp.status_code}) กรุณาลองใหม่ภายหลัง")
+                    )
+
+            except Exception as e:
+                print("❌ login error:", e)
+                line_bot_api.push_message(
+                    user_id,
+                    TextSendMessage(text=f"เกิดข้อผิดพลาดในการดึงปฏิทิน: {e}")
+                )
+                       
+        email_pattern = r"^[\w\.-]+@[\w\.-]+\.\w{2,}$"
+        if re.match(email_pattern, text):
+            user_email = text.strip()
+
+            # ตอบกลับทันที
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text="กำลังตรวจสอบสิทธิ์และดึงข้อมูลปฏิทิน โปรดรอสักครู่...")
+            )
+
+            # เรียกทำงานฉากหลัง
+            scheduler.add_job(
+                func=background_login_and_push,
+                args=[user_id, user_email],
+                trigger="date",
+                run_date=datetime.now() + timedelta(seconds=1)
+            )
+
+            # reset session
+            session.clear()
+            session["state"] = "initial"
+        else:
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text="รูปแบบอีเมลไม่ถูกต้อง กรุณาลองใหม่")
+            )
+           
     # ================= PROFILE FLOW =================
     # Age input
     elif session["state"] == "profile_age":
@@ -582,7 +660,10 @@ def send_initial_options(reply_token_or_user_id):
     """Send initial options with Quick Reply"""
     items = [
         QuickReplyButton(action=MessageAction(label="กรอกข้อมูล Manager", text="กรอกข้อมูล Manager")),
-        QuickReplyButton(action=MessageAction(label="วิธีการใช้", text="วิธีการใช้"))
+        QuickReplyButton(action=MessageAction(label="วิธีการใช้", text="วิธีการใช้")),
+        QuickReplyButton(action=MessageAction(label="login(M&R)",
+                                             text="login(สำหรับ Manager & Recruiter)"))  
+  
     ]
     
     quick_reply = QuickReply(items=items)
@@ -758,6 +839,9 @@ def create_meeting_confirmation(meeting_info):
     confirmation += "จองบน google calendar และส่งอีเมลเรียบร้อยแล้ว"
     
     return confirmation
+
+
+
 
 if __name__ == "__main__":
     uvicorn.run(app, host="localhost", port=8001)

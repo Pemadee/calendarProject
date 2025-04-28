@@ -25,7 +25,7 @@ from src.config import *
 from src.api.endpoints import *
 from src.models.schemas import ManagerRecruiter
 thread_pool = ThreadPoolExecutor(max_workers=20)
-
+base_url = os.environ.get('BASE_URL_NGROK')
 
 def is_token_valid(user_email: str) -> bool:
     """ตรวจสอบว่า token ของผู้ใช้ยังใช้งานได้หรือไม่"""
@@ -97,7 +97,7 @@ def get_credentials(user_email: str):
             flow = InstalledAppFlow.from_client_secrets_file(CLIENT_SECRET_FILE, SCOPES)
             
             # กำหนด redirect_uri อย่างชัดเจน
-            base_url = os.environ.get('BASE_URL')
+            
             flow.redirect_uri = f"{base_url}/oauth2callback"
             
             # สร้าง authorization URL พร้อมกำหนด state ให้เก็บ email

@@ -54,7 +54,7 @@ FILE_PATH = os.path.join(os.path.dirname(__file__), '..', '..', os.getenv("FILE_
 logging.getLogger('googleapiclient.discovery_cache').setLevel(logging.ERROR)
 line_bot_api = LineBotApi(os.getenv("CHANNEL_ACCESS_TOKEN"))
 handler = WebhookHandler(os.getenv("CHANNEL_SECRET"))
-
+base_url = os.environ.get('BASE_URL_NGROK')
 
 @app.get("/")
 def read_root():
@@ -82,7 +82,6 @@ def oauth2callback(code: str, state: str = None):
         
         # สร้าง flow
         flow = InstalledAppFlow.from_client_secrets_file(CLIENT_SECRET_FILE, SCOPES)
-        base_url = os.environ.get('BASE_URL')
         flow.redirect_uri = f"{base_url}/oauth2callback"
         
         # แลก code เป็น token
