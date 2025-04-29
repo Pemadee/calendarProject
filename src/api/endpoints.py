@@ -27,7 +27,6 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '.
 from src.config import *
 from src.utils.func import *
 from src.models.schemas import *
-# ###################
 import logging
 
 logging.basicConfig(level=logging.INFO)
