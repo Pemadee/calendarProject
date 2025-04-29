@@ -809,9 +809,6 @@ def handle_message(event):
                 end_time=session["end_time"],
                 attendees=[]
         )
-        print(session.get('location'))  # เช็กค่า location ที่ได้จาก session
-        print(session.get('start_time'))  # เช็ก start_time
-        print(session.get('end_time'))    # เช็ก end_time
         
         # สร้างข้อความยืนยันการนัดหมาย
         meeting_confirmation = create_meeting_confirmation(meeting_info)
