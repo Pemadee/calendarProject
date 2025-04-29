@@ -27,8 +27,5 @@ except Exception as e:
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     print(f"เริ่มต้น FastAPI บน port {port}...")
-    # print(f"เข้าถึง API documentation ได้ที่: http://localhost:{port}/docs")
-    # print(f"กำหนด redirect URI สำหรับ OAuth2: {REDIRECT_URI} (port: {AUTH_PORT})")
-    # uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
     # venv\Scripts\activate
     # uvicorn main:app --host 0.0.0.0 --port 8000 --reload

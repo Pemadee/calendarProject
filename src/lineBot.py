@@ -16,7 +16,6 @@ from datetime import datetime, time, timedelta
 import time as t 
 from typing import Dict, List, Any
 from apscheduler.schedulers.background import BackgroundScheduler
-from handler_line import send_book_meeting
 from api.endpoints import *
 from models.schemas import BulkEventRequest
 from linebot.models import TemplateSendMessage, ButtonsTemplate, URIAction
@@ -33,7 +32,7 @@ scheduler.start()
 user_sessions = {}
 
 # Configuration for data API service
-base_url = os.getenv("BASE_URL_NGROK")
+base_url = os.getenv("BASE_URL")
 
 def validate_email(email):
     """Simple email validation."""
@@ -144,17 +143,7 @@ def handle_message(event):
 
                 # ===== Got events =====
                 if resp.status_code == 200:
-                    data = resp.json()
-                    events = data.get("events", [])
-                    if events:
-                        lines = [f"📅 ปฏิทินของ {user_email} (7 วันถัดไป)"]
-                        for ev in events[:10]:
-                            lines.append(f"• {ev['start']} ▶ {ev['summary']}")
-                        reply_text = "\n".join(lines)
-                    else:
-                        reply_text = f"ไม่พบกิจกรรม 7 วันถัดไปของ {user_email}"
-
-                    line_bot_api.push_message(user_id, TextSendMessage(text=f"✅ Login สำเร็จ\n\n{reply_text}"))
+                    line_bot_api.push_message(user_id, TextSendMessage(text=f"✅ Login สำเร็จ"))
                 else:
                     line_bot_api.push_message(
                         user_id,
@@ -685,8 +674,12 @@ def handle_message(event):
                 TextSendMessage(text="กรุณาเลือกช่วงเวลาที่ถูกต้อง")
             )
     
+<<<<<<< HEAD
     
 # Pair selection
+=======
+    # Pair selection
+>>>>>>> 19b4102386f66f4f72ea364658d09440d1a41fc8
     elif session["state"] == "select_pair":
         try:
             pair_number = int(text.strip("()"))
@@ -818,22 +811,36 @@ def handle_message(event):
             event.reply_token,
             TextSendMessage(text=meeting_confirmation)
         )
+        def send_book_meeting(meeting_result):
+            try:
+                print("🚀 POST ข้อมูล:", meeting_result.dict())
+                print(base_url)
+                response = requests.post(
+                    f"{base_url}/events/create-bulk",
+                    json=meeting_result.dict(),
+                    headers={"Content-Type": "application/json"},
+                    timeout=30
+                )
+                print("✅ POST สำเร็จ:", response.status_code)
+            except Exception as e:
+                print("❌ POST ล้มเหลว:", str(e))
+
+
+
         #ส่งข้อมูลให้ไป api ที่ทำการ book ใน google calendar ผู้ใช้ตาม meeting_result ที่ส่งไป และส่งอีเมลให้ manager recruiter
-        threading.Thread(target=send_book_meeting, args=(meeting_result,)).start()
+        scheduler.add_job(
+                func=send_book_meeting,
+                args=[meeting_result],
+                trigger="date",
+                run_date=datetime.now() + timedelta(seconds=10)
+            )
+        
         # รีเซ็ตสถานะแต่เก็บข้อมูลโปรไฟล์
         profile_data = {k: session[k] for k in ["age", "exp", "eng_level", "location", "available_time_slots"] if k in session}
         session.clear()
         session.update(profile_data)
         session["state"] = "initial"
         session["profile_completed"] = True
-
-@handler.add(MessageEvent)
-def catch_all_message(event):
-    print("🛎 Event received:", event)
-
-    # แล้วดูว่า event.message.type เป็นอะไร
-    if hasattr(event, 'message') and hasattr(event.message, 'type'):
-        print("🛎 Event message type:", event.message.type)
 
 def send_initial_options(reply_token_or_user_id):
     """Send initial options with Quick Reply"""
@@ -936,7 +943,7 @@ def send_time_slots(reply_token_or_user_id, time_slots, selected_date):
     else:
         line_bot_api.reply_message(reply_token_or_user_id, message)
 
-        
+ 
 def send_pair_selection(reply_token, time_slot):
     """Send Manager-Recruiter pairs for selection"""
     # Create message with available pairs
