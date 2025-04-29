@@ -73,29 +73,18 @@ def handle_message(event):
                 event.reply_token,
                 TextSendMessage(text="กรุณาระบุอายุ")
             )
-        elif text == "เพิ่มอีเมล":  # เพิ่มเงื่อนไขนี้
-            session["state"] = "enter_email"
-            line_bot_api.reply_message(
-                event.reply_token,
-                TextSendMessage(text="กรุณากรอกอีเมลที่ต้องการเพิ่มเข้าระบบ:")
-            )
+            
         elif text == "วิธีการใช้":
             usage_text = "นี่คือบริการหาช่วงเวลานัดประชุมอัจฉริยะ หากอยากใช้ให้เลือกหรือพิมพ์ \"กรอกข้อมูล Manager\" หากอยากยกเลิกการทำงานในขั้นตอนใดขั้นตอนนึงสามารถพิมพ์ \"ยกเลิก\""
-            
-            # Send usage info with quick reply to start again
-            items = [
-                QuickReplyButton(action=MessageAction(label="กรอกข้อมูล Manager", text="กรอกข้อมูล Manager"))
-            ]
-            
-            quick_reply = QuickReply(items=items)
-            
             line_bot_api.reply_message(
                 event.reply_token,
-                TextSendMessage(text=usage_text, quick_reply=quick_reply)
+                TextSendMessage(text=f"{usage_text}")
             )
+            session.clear()    
+            session["state"] = "initial"
+            send_initial_options(event.reply_token)
+            return
             
-            # Keep state as waiting_initial_choice
-            session["state"] = "waiting_initial_choice"
         elif text == "login(สำหรับ Manager & Recruiter)":          
             session["state"] = "login_email"
             line_bot_api.reply_message(
@@ -139,16 +128,29 @@ def handle_message(event):
                         user_id,
                         TextSendMessage(text=message_text)
                     )
+                    session.clear()    
+                    session["state"] = "initial"
+                    send_initial_options(event.reply_token)
                     return
+                    
 
                 # ===== Got events =====
                 if resp.status_code == 200:
                     line_bot_api.push_message(user_id, TextSendMessage(text=f"✅ Login สำเร็จ"))
+                    session.clear()    
+                    session["state"] = "initial"
+                    send_initial_options(event.reply_token)
+                    return
+                
                 else:
                     line_bot_api.push_message(
                         user_id,
                         TextSendMessage(text=f"เกิดข้อผิดพลาด (status {resp.status_code}) กรุณาลองใหม่ภายหลัง")
                     )
+                    session.clear()    
+                    session["state"] = "initial"
+                    send_initial_options(event.reply_token)
+                    return
 
             except Exception as e:
                 print("❌ login error:", e)
@@ -176,8 +178,10 @@ def handle_message(event):
             )
 
             # reset session
-            session.clear()
+            session.clear()    
             session["state"] = "initial"
+            send_initial_options(event.reply_token)
+            return
         else:
             line_bot_api.reply_message(
                 event.reply_token,
@@ -247,95 +251,20 @@ def handle_message(event):
                 # reset session
                 session.clear()
                 session["state"] = "initial"
+                send_initial_options(user_id)
             else:
                 line_bot_api.reply_message(
                     event.reply_token,
                     TextSendMessage(text="รูปแบบอีเมลไม่ถูกต้อง กรุณาลองใหม่")
                 )
+                # reset session
+                session.clear()
+                session["state"] = "initial"
+                send_initial_options(user_id)
 
 
     # ================= PROFILE FLOW =================
     # Age input
-    # ส่วนจัดการการเพิ่มอีเมล
-    elif session["state"] == "enter_email":
-        email = text.strip()
-        # Validate email format
-        if not validate_email(email):
-            line_bot_api.reply_message(
-                event.reply_token,
-                TextSendMessage(text="รูปแบบอีเมลไม่ถูกต้อง กรุณากรอกอีเมลใหม่")
-            )
-            return
-        
-        session["email"] = email
-        session["state"] = "confirm_email"
-        
-        # สร้าง quick reply สำหรับยืนยันอีเมล
-        items = [
-            QuickReplyButton(action=MessageAction(label="✅ ยืนยัน", text="ยืนยันอีเมล")),
-            QuickReplyButton(action=MessageAction(label="❌ ยกเลิก", text="ยกเลิก"))
-        ]
-        
-        quick_reply = QuickReply(items=items)
-        
-        line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(
-                text=f"ยืนยันการเพิ่มอีเมล: {email}?",
-                quick_reply=quick_reply
-            )
-        )
-
-    elif session["state"] == "confirm_email":
-        if text == "ยืนยันอีเมล":
-            email = session.get("email", "")
-            from urllib.parse import quote
-            encoded_email = quote(email)
-            
-            # สร้าง URL สำหรับการยืนยัน
-            api_url = f"https://0bf4-49-228-96-87.ngrok-free.app/{encoded_email}"
-            
-            # สร้าง quick reply สำหรับเมื่อเข้าสู่ระบบเรียบร้อย
-            items = [
-                QuickReplyButton(action=MessageAction(label="เข้าสู่ระบบเรียบร้อย", text="เข้าสู่ระบบเรียบร้อย"))
-            ]
-            
-            quick_reply = QuickReply(items=items)
-            
-            line_bot_api.reply_message(
-                event.reply_token,
-                TextSendMessage(
-                    text=f"กรุณาเข้าลิงก์เพื่อยันยันการเข้าสู่ระบบ\n\n**เมื่อเข้าสู่ระบบเสร็จสิ้นกรุณากดด้านล่าง \"เข้าสู่ระบบเรียบร้อย\"**\n\n{api_url}",
-                    quick_reply=quick_reply
-                )
-            )
-            session["state"] = "waiting_login_confirmation"
-            
-        elif text == "ยกเลิก":
-            # Reset state and go back to initial options
-            session.clear()
-            session["state"] = "initial"
-            send_initial_options(event.reply_token)
-
-    elif session["state"] == "waiting_login_confirmation":
-        if text == "เข้าสู่ระบบเรียบร้อย":
-            line_bot_api.reply_message(
-                event.reply_token,
-                TextSendMessage(text="ขอบคุณสำหรับการเพิ่มอีเมลและเข้าสู่ระบบ! คุณสามารถใช้งานระบบได้แล้ว")
-            )
-            # Reset state and go back to initial options
-            session.clear()
-            session["state"] = "initial"
-            
-            # Show initial options again with push message
-            def send_initial_options_later():
-                send_initial_options(user_id)
-                
-            scheduler.add_job(
-                func=send_initial_options_later,
-                trigger="date",
-                run_date=datetime.now() + timedelta(seconds=1)
-            )
     elif session["state"] == "profile_age":
         try:
             age = int(text)
@@ -674,12 +603,9 @@ def handle_message(event):
                 TextSendMessage(text="กรุณาเลือกช่วงเวลาที่ถูกต้อง")
             )
     
-<<<<<<< HEAD
     
 # Pair selection
-=======
     # Pair selection
->>>>>>> 19b4102386f66f4f72ea364658d09440d1a41fc8
     elif session["state"] == "select_pair":
         try:
             pair_number = int(text.strip("()"))
@@ -751,6 +677,7 @@ def handle_message(event):
                 event.reply_token,
                 TextSendMessage(text="ยกเลิกการนัดหมายเรียบร้อยแล้ว")
             )
+            
             # Reset state but keep profile information
             profile_data = {k: session[k] for k in ["age", "exp", "eng_level", "location"] if k in session}
             session.clear()
@@ -841,6 +768,7 @@ def handle_message(event):
         session.update(profile_data)
         session["state"] = "initial"
         session["profile_completed"] = True
+        send_initial_options(user_id)
 
 def send_initial_options(reply_token_or_user_id):
     """Send initial options with Quick Reply"""
