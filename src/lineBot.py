@@ -71,17 +71,16 @@ def handle_message(event):
         elif text == "วิธีการใช้":
             usage_text = "นี่คือบริการหาช่วงเวลานัดประชุมอัจฉริยะ หากอยากใช้ให้เลือกหรือพิมพ์ \"กรอกข้อมูล Manager\" หากอยากยกเลิกการทำงานในขั้นตอนใดขั้นตอนนึงสามารถพิมพ์ \"ยกเลิก\""
             
-            # Send usage info with quick reply to start again
-            items = [
-                QuickReplyButton(action=MessageAction(label="กรอกข้อมูล Manager", text="กรอกข้อมูล Manager"))
-            ]
-            
-            quick_reply = QuickReply(items=items)
-            
+
             line_bot_api.reply_message(
                 event.reply_token,
-                TextSendMessage(text=usage_text, quick_reply=quick_reply)
+                TextSendMessage(text=usage_text)
             )
+            session.clear()
+            session["state"] = "initial"
+            send_initial_options(event.reply_token)
+            return
+        
             
             # Keep state as waiting_initial_choice
             session["state"] = "waiting_initial_choice"
@@ -128,16 +127,28 @@ def handle_message(event):
                         user_id,
                         TextSendMessage(text=message_text)
                     )
+                                            # reset session
+                    session.clear()
+                    session["state"] = "initial"
+                    send_initial_options(event.reply_token)
                     return
 
                 # ===== Got events =====
                 if resp.status_code == 200:
                     line_bot_api.push_message(user_id, TextSendMessage(text=f"✅ Login สำเร็จ"))
+                                            # reset session
+                    session.clear()
+                    session["state"] = "initial"
+                    send_initial_options(event.reply_token)
                 else:
                     line_bot_api.push_message(
                         user_id,
                         TextSendMessage(text=f"เกิดข้อผิดพลาด (status {resp.status_code}) กรุณาลองใหม่ภายหลัง")
                     )
+                                            # reset session
+                    session.clear()
+                    session["state"] = "initial"
+                    send_initial_options(event.reply_token)
 
             except Exception as e:
                 print("❌ login error:", e)
@@ -145,6 +156,10 @@ def handle_message(event):
                     user_id,
                     TextSendMessage(text=f"เกิดข้อผิดพลาดในการดึงปฏิทิน: {e}")
                 )
+                                        # reset session
+                session.clear()
+                session["state"] = "initial"
+                send_initial_options(event.reply_token)
 
         email_pattern = r"^[\w\.-]+@[\w\.-]+\.\w{2,}$"
         if re.match(email_pattern, text):
@@ -167,11 +182,18 @@ def handle_message(event):
             # reset session
             session.clear()
             session["state"] = "initial"
+            send_initial_options(event.reply_token)
         else:
             line_bot_api.reply_message(
                 event.reply_token,
                 TextSendMessage(text="รูปแบบอีเมลไม่ถูกต้อง กรุณาลองใหม่")
             )
+            
+            # reset session
+            session.clear()
+            session["state"] = "initial"
+            send_initial_options(event.reply_token)
+            
             def background_login_and_push(user_id, user_email):
                 """ดึง events ใน background แล้ว push กลับหาผู้ใช้"""
                 try:
@@ -198,15 +220,27 @@ def handle_message(event):
                             for ev in events[:10]:
                                 lines.append(f"• {ev['start']} ▶ {ev['summary']}")
                             reply_text = "\n".join(lines)
+                            
                         else:
                             reply_text = f"ไม่พบกิจกรรม 7 วันถัดไปของ {user_email}"
-
+                            # reset session
+                            session.clear()
+                            session["state"] = "initial"
+                            send_initial_options(event.reply_token)
                         line_bot_api.push_message(user_id, TextSendMessage(text=f"✅ Login สำเร็จ\n\n{reply_text}"))
+                        # reset session
+                        session.clear()
+                        session["state"] = "initial"
+                        send_initial_options(event.reply_token)
                     else:
                         line_bot_api.push_message(
                             user_id,
                             TextSendMessage(text=f"เกิดข้อผิดพลาด (status {resp.status_code}) กรุณาลองใหม่ภายหลัง")
                         )
+                                        # reset session
+                        session.clear()
+                        session["state"] = "initial"
+                        send_initial_options(event.reply_token)
 
                 except Exception as e:
                     print("❌ login error:", e)
@@ -214,6 +248,9 @@ def handle_message(event):
                         user_id,
                         TextSendMessage(text=f"เกิดข้อผิดพลาดในการดึงปฏิทิน: {e}")
                     )
+                    session.clear()
+                    session["state"] = "initial"
+                    send_initial_options(event.reply_token)
                         
             email_pattern = r"^[\w\.-]+@[\w\.-]+\.\w{2,}$"
             if re.match(email_pattern, text):
@@ -236,11 +273,16 @@ def handle_message(event):
                 # reset session
                 session.clear()
                 session["state"] = "initial"
+                send_initial_options(event.reply_token)
             else:
+                
                 line_bot_api.reply_message(
                     event.reply_token,
                     TextSendMessage(text="รูปแบบอีเมลไม่ถูกต้อง กรุณาลองใหม่")
                 )
+                session.clear()
+                session["state"] = "initial"
+                send_initial_options(event.reply_token)
 
 
 
