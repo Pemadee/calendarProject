@@ -1,20 +1,21 @@
 # Standard library
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
-from email.message import EmailMessage
-from functools import lru_cache
+from email.mime.multipart import MIMEMultipart
 import json
 import os
 from datetime import datetime, time, timedelta, timezone
+import smtplib
 import sys
-from typing import Dict, List
+import time as timeTest
+
 # Third-party libraries
-import aiosmtplib
 from google.auth.transport.requests import Request as GoogleRequest
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 import pandas as pd
+from email.mime.text import MIMEText
 
 
 
@@ -25,7 +26,9 @@ from src.config import *
 from src.api.endpoints import *
 from src.models.schemas import ManagerRecruiter
 thread_pool = ThreadPoolExecutor(max_workers=20)
-base_url = os.environ.get('BASE_URL_NGROK')
+base_url = os.environ.get('BASE_URL')
+EMAIL_SENDER = os.getenv("EMAIL_to_SEND_MESSAGE")
+EMAIL_PASSWORD = os.getenv("PASSWORD_EMAIL")
 
 def is_token_valid(user_email: str) -> bool:
     """ตรวจสอบว่า token ของผู้ใช้ยังใช้งานได้หรือไม่"""
@@ -54,6 +57,7 @@ def is_token_valid(user_email: str) -> bool:
             # ตรวจสอบว่า token ยังใช้งานได้
             if creds.valid:
                 print(f"Token ยังใช้งานได้สำหรับ {user_email}")
+
                 return True
                 
             # ถ้า token หมดอายุแต่มี refresh_token
@@ -207,7 +211,7 @@ def get_people(file_path,
     อ่านไฟล์ Excel แล้วกรองข้อมูลตามเงื่อนไข
     พร้อมคืนชื่อ‑อีเมล‑สถานที่ ของชีต M และ R
     """
-
+    starttime = timeTest.time()
     # ---------- 1) โหลดทุกชีต ----------
     sheets = pd.read_excel(file_path, sheet_name=None)
     df_M = sheets['M'].copy()
@@ -258,7 +262,8 @@ def get_people(file_path,
         df_R[['Name', 'Email', 'Location']]
         .to_dict(orient='records')
     )
-
+    endtime = timeTest.time()
+    # print(f"Took {endtime - starttime:.4f} sec")
     return {'M': list_M, 'R': list_R}
 
 def get_email(file_path,
@@ -336,7 +341,6 @@ def is_available(events, start_time, end_time):
         # ถ้ามีเวลาที่ทับซ้อนกัน ถือว่าไม่ว่าง
         if (start_time < event_end and end_time > event_start):
             return False
-    
     return True
 
 def parse_event_time(time_str):
@@ -354,5 +358,35 @@ def parse_event_time(time_str):
         dt = datetime.strptime(time_str, '%Y-%m-%d')
         return dt.replace(tzinfo=timezone.utc)
 
+def send_notification_email(receiver_email: str, subject: str, body: str):
+    try:
+        msg = MIMEMultipart()
+        msg['From'] = EMAIL_SENDER
+        msg['To'] = receiver_email
+        msg['Subject'] = subject
 
+        msg.attach(MIMEText(body, 'plain'))
+
+        # ใช้ Gmail SMTP Server
+        with smtplib.SMTP('smtp.gmail.com', 587) as server:
+            server.starttls()
+            server.login(EMAIL_SENDER, EMAIL_PASSWORD)
+            server.send_message(msg)
+        
+        print(f"✅ ส่งอีเมลสำเร็จไปยัง {receiver_email}")
+    except Exception as e:
+        print(f"❌ ส่งอีเมลล้มเหลว: {str(e)}")
+
+def get_day_suffix(day):
+    if 11 <= day <= 13:
+        return 'th'
+    last_digit = day % 10
+    if last_digit == 1:
+        return 'st'
+    elif last_digit == 2:
+        return 'nd'
+    elif last_digit == 3:
+        return 'rd'
+    else:
+        return 'th'
 
