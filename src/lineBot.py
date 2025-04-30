@@ -53,15 +53,19 @@ def handle_message(event):
         session["state"] = "initial"
         send_initial_options(event.reply_token)
         return
-    
-    # Initial state or any unknown message
-    if session["state"] == "initial" or (text not in ["กรอกข้อมูล Manager", "วิธีการใช้"] and session["state"] not in ["waiting_initial_choice", "profile_age", "profile_exp", "profile_eng_level", "profile_location", "profile_confirm", "select_date", "select_time_slot", "select_pair", "confirm", "meeting_name", "meeting_description", "meeting_summary", "login_email"]):
-        session["state"] = "waiting_initial_choice"
+
+    # ✅ แก้ตรงนี้: เปลี่ยนจาก if → elif และแยกให้ชัดเจน
+    elif text not in ["กรอกข้อมูล Manager", "วิธีการใช้", "login(สำหรับ Manager & Recruiter)"] and session["state"] not in [
+        "profile_age", "profile_exp", "profile_eng_level", "profile_location",
+        "profile_confirm", "select_date", "select_time_slot", "select_pair",
+        "confirm", "meeting_name", "meeting_description", "meeting_summary", "login_email"
+    ]:
+        session["state"] = "initial"
         send_initial_options(event.reply_token)
         return
-    
-    # Handle quick reply selection for initial options
-    elif session["state"] == "waiting_initial_choice":
+
+    # แก้ส่วนนี้จากประมาณบรรทัด 87
+    elif session["state"] == "initial":  # เปลี่ยนจาก waiting_initial_choice เป็น initial
         if text == "กรอกข้อมูล Manager":
             session["state"] = "profile_age"
             line_bot_api.reply_message(
@@ -71,21 +75,15 @@ def handle_message(event):
         elif text == "วิธีการใช้":
             usage_text = "นี่คือบริการหาช่วงเวลานัดประชุมอัจฉริยะ หากอยากใช้ให้เลือกหรือพิมพ์ \"กรอกข้อมูล Manager\" หากอยากยกเลิกการทำงานในขั้นตอนใดขั้นตอนนึงสามารถพิมพ์ \"ยกเลิก\""
             
-            # Send usage info with quick reply to start again
-            items = [
-                QuickReplyButton(action=MessageAction(label="กรอกข้อมูล Manager", text="กรอกข้อมูล Manager"))
-            ]
-            
-            quick_reply = QuickReply(items=items)
-            
             line_bot_api.reply_message(
                 event.reply_token,
-                TextSendMessage(text=usage_text, quick_reply=quick_reply)
+                TextSendMessage(text=usage_text)
             )
-            
-            # Keep state as waiting_initial_choice
-            session["state"] = "waiting_initial_choice"
+            session.clear()
+            session["state"] = "initial"
+            send_menu_only(user_id)
 
+            return
         elif text == "login(สำหรับ Manager & Recruiter)":          
             session["state"] = "login_email"
             line_bot_api.reply_message(
@@ -93,7 +91,7 @@ def handle_message(event):
                 TextSendMessage(text="กรุณากรอกอีเมลของคุณ (example@company.com)")
             )
         else:
-            # If user enters something else while waiting for choice
+            # ถ้าผู้ใช้พิมพ์อย่างอื่นที่ไม่ใช่ตัวเลือก ให้แสดงเมนูใหม่
             send_initial_options(event.reply_token)
 
     elif session["state"] == "login_email":  
@@ -127,16 +125,28 @@ def handle_message(event):
                         user_id,
                         TextSendMessage(text=message_text)
                     )
+                                            # reset session
+                    session.clear()
+                    session["state"] = "initial"
+                    send_menu_only(user_id)
                     return
 
                 # ===== Got events =====
                 if resp.status_code == 200:
                     line_bot_api.push_message(user_id, TextSendMessage(text=f"✅ Login สำเร็จ"))
+                                            # reset session
+                    session.clear()
+                    session["state"] = "initial"
+                    send_menu_only(user_id)
                 else:
                     line_bot_api.push_message(
                         user_id,
                         TextSendMessage(text=f"เกิดข้อผิดพลาด (status {resp.status_code}) กรุณาลองใหม่ภายหลัง")
                     )
+                                            # reset session
+                    session.clear()
+                    session["state"] = "initial"
+                    send_menu_only(user_id)
 
             except Exception as e:
                 print("❌ login error:", e)
@@ -144,6 +154,10 @@ def handle_message(event):
                     user_id,
                     TextSendMessage(text=f"เกิดข้อผิดพลาดในการดึงปฏิทิน: {e}")
                 )
+                                        # reset session
+                session.clear()
+                session["state"] = "initial"
+                send_menu_only(user_id)
 
         email_pattern = r"^[\w\.-]+@[\w\.-]+\.\w{2,}$"
         if re.match(email_pattern, text):
@@ -166,11 +180,18 @@ def handle_message(event):
             # reset session
             session.clear()
             session["state"] = "initial"
+            send_menu_only(user_id)
         else:
             line_bot_api.reply_message(
                 event.reply_token,
                 TextSendMessage(text="รูปแบบอีเมลไม่ถูกต้อง กรุณาลองใหม่")
             )
+            
+            # reset session
+            session.clear()
+            session["state"] = "initial"
+            send_menu_only(user_id)
+            
             def background_login_and_push(user_id, user_email):
                 """ดึง events ใน background แล้ว push กลับหาผู้ใช้"""
                 try:
@@ -197,15 +218,27 @@ def handle_message(event):
                             for ev in events[:10]:
                                 lines.append(f"• {ev['start']} ▶ {ev['summary']}")
                             reply_text = "\n".join(lines)
+                            
                         else:
                             reply_text = f"ไม่พบกิจกรรม 7 วันถัดไปของ {user_email}"
-
+                            # reset session
+                            session.clear()
+                            session["state"] = "initial"
+                            send_menu_only(user_id)
                         line_bot_api.push_message(user_id, TextSendMessage(text=f"✅ Login สำเร็จ\n\n{reply_text}"))
+                        # reset session
+                        session.clear()
+                        session["state"] = "initial"
+                        send_menu_only(user_id)
                     else:
                         line_bot_api.push_message(
                             user_id,
                             TextSendMessage(text=f"เกิดข้อผิดพลาด (status {resp.status_code}) กรุณาลองใหม่ภายหลัง")
                         )
+                                        # reset session
+                        session.clear()
+                        session["state"] = "initial"
+                        send_menu_only(user_id)
 
                 except Exception as e:
                     print("❌ login error:", e)
@@ -213,6 +246,9 @@ def handle_message(event):
                         user_id,
                         TextSendMessage(text=f"เกิดข้อผิดพลาดในการดึงปฏิทิน: {e}")
                     )
+                    session.clear()
+                    session["state"] = "initial"
+                    send_menu_only(user_id)
                         
             email_pattern = r"^[\w\.-]+@[\w\.-]+\.\w{2,}$"
             if re.match(email_pattern, text):
@@ -232,14 +268,16 @@ def handle_message(event):
                     run_date=datetime.now() + timedelta(seconds=1)
                 )
 
-                # reset session
-                session.clear()
-                session["state"] = "initial"
+
             else:
+                
                 line_bot_api.reply_message(
                     event.reply_token,
                     TextSendMessage(text="รูปแบบอีเมลไม่ถูกต้อง กรุณาลองใหม่")
                 )
+                session.clear()
+                session["state"] = "initial"
+                send_menu_only(user_id)
 
     # ================= PROFILE FLOW =================
     # Age input
@@ -410,8 +448,8 @@ def handle_message(event):
         if text == "ยืนยัน":
             line_bot_api.reply_message(
                 event.reply_token,
-                TextSendMessage(text="กำลังค้นหาเวลาว่าง โปรดรอสักครู่...")
-            )
+                TextSendMessage(text="กำลังค้นหาเวลาว่าง โปรดรอสักครู่..."))
+           
             def background_post_and_push(user_id, session_data):
                 
                 try:
@@ -439,7 +477,7 @@ def handle_message(event):
                         # เก็บข้อมูลที่ได้รับจาก API ลงใน session
                         user_sessions[user_id]["state"] = "select_date"  # ต้องแก้ไขเป็น user_sessions[user_id] แทน session
                         user_sessions[user_id]["available_time_slots"] = response.json().get("available_time_slots", [])
-                        
+                        print(user_sessions[user_id]["available_time_slots"])
                         # แสดงข้อความยืนยันการบันทึกข้อมูล
                         line_bot_api.push_message(
                             user_id,
@@ -467,7 +505,7 @@ def handle_message(event):
                 trigger="date",
                 run_date=datetime.now() + timedelta(seconds=2)
             )
-   
+        
               
         elif text == "ยกเลิก":
             # Reset session and go back to initial state
@@ -560,6 +598,18 @@ def handle_message(event):
     
     # Time slot selection
     elif session["state"] == "select_time_slot":
+        if text == "ย้อนกลับ":  # เพิ่มการจัดการปุ่มย้อนกลับ
+            # กลับไปเลือกวันที่
+            session["state"] = "select_date"
+            # ล้างข้อมูลวันที่ที่เลือกไว้
+            if "selected_date" in session:
+                del session["selected_date"]
+            if "selected_date_iso" in session:
+                del session["selected_date_iso"]
+            # ส่งหน้าเลือกวันที่ใหม่
+            send_date_selection(event.reply_token, session["available_time_slots"])
+            return
+            
         try:
             slot_number = int(text.strip("()"))
             if 1 <= slot_number <= len(session["time_slots"]):
@@ -583,6 +633,16 @@ def handle_message(event):
     
     # Pair selection
     elif session["state"] == "select_pair":
+        if text == "ย้อนกลับ":  # เพิ่มการจัดการปุ่มย้อนกลับ
+            # กลับไปเลือกช่วงเวลา
+            session["state"] = "select_time_slot"
+            # ล้างข้อมูลช่วงเวลาที่เลือกไว้
+            if "selected_time_slot" in session:
+                del session["selected_time_slot"]
+            # ส่งหน้าเลือกช่วงเวลาใหม่
+            send_time_slots(event.reply_token, session["time_slots"], session["selected_date"])
+            return
+            
         try:
             pair_number = int(text.strip("()"))
             if 1 <= pair_number <= len(session["selected_time_slot"]["pair_details"]):
@@ -638,15 +698,86 @@ def handle_message(event):
                 event.reply_token,
                 TextSendMessage(text="กรุณาเลือกคู่ Manager-Recruiter ที่ถูกต้อง")
             )
-    
+        
     # Meeting confirmation
     elif session["state"] == "confirm":
+        if text == "ย้อนกลับ":  # เพิ่มการจัดการปุ่มย้อนกลับ
+            # กลับไปเลือกคู่ Manager-Recruiter
+            session["state"] = "select_pair"
+            # ล้างข้อมูลคู่ที่เลือกไว้
+            if "selected_pair" in session:
+                del session["selected_pair"]
+            if "emails" in session:
+                del session["emails"]
+            if "start_time" in session:
+                del session["start_time"]
+            if "end_time" in session:
+                del session["end_time"]
+            # ส่งหน้าเลือกคู่ใหม่
+            send_pair_selection(event.reply_token, session["selected_time_slot"])
+            return
+            
         if text == "สร้างนัด":
-            session["state"] = "meeting_name"
+            # ตั้งค่าชื่อและรายละเอียดการประชุมแบบตายตัว แทนการไปยังสถานะ meeting_name
+            session["meeting_name"] = "นัดประชุม"
+            session["meeting_description"] = "นัดสัมภาษณ์งานหน่อยครับผม ครับพี่ ดีครับเพื่อน"
+            
+            # สร้างข้อมูลการนัดหมาย
+            selected_pair = session["selected_pair"]
+            participants = [selected_pair["manager"]["name"], selected_pair["recruiter"]["name"]]
+            
+            meeting_info = {
+                "name": session["meeting_name"],
+                "description": session["meeting_description"],
+                "date": session["selected_date"],
+                "time": session["selected_time_slot"]["time"],
+                "duration": "30 นาที",
+                "participants": participants,
+                "created_at": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
+                "created_by": user_id
+            }
+            meeting_result = BulkEventRequest(
+                    user_emails=session["emails"],
+                    summary=session["meeting_name"],
+                    description=session["meeting_description"],
+                    location= f"{session.get('location')}",
+                    start_time=session["start_time"],
+                    end_time=session["end_time"],
+                    attendees=[]
+            )
+            
+            # สร้างข้อความยืนยันการนัดหมาย
+            meeting_confirmation = create_meeting_confirmation(meeting_info)
+            
+            # ส่งข้อความยืนยันการนัดหมาย
             line_bot_api.reply_message(
                 event.reply_token,
-                TextSendMessage(text="กรุณากรอกชื่อการประชุม : ")
+                TextSendMessage(text=meeting_confirmation)
             )
+
+            # ส่งข้อมูลให้ไป api
+            scheduler.add_job(
+                    func=send_book_meeting,
+                    args=[meeting_result],
+                    trigger="date",
+                    run_date=datetime.now() + timedelta(seconds=10)
+                )
+            
+            # รีเซ็ตสถานะและแสดงเมนูหลัก
+            profile_data = {k: session[k] for k in ["age", "exp", "eng_level", "location", "available_time_slots"] if k in session}
+            session.clear()
+            session.update(profile_data)
+            session["state"] = "initial"
+            session["profile_completed"] = True
+            
+            # เพิ่มการแสดงเมนูหลักหลังการทำงานเสร็จสิ้น
+            send_menu_only(user_id)
+            # scheduler.add_job(
+            #     func=send_menu_only,
+            #     args=[user_id],
+            #     trigger="date",
+            #     run_date=datetime.now() + timedelta(seconds=12)
+            # )
             
         elif text == "ยกเลิกนัด":
             line_bot_api.reply_message(
@@ -661,127 +792,50 @@ def handle_message(event):
             session["profile_completed"] = True
             
             # Show initial options again
-            send_initial_options(user_id)
+            send_menu_only(user_id)
         else:
             line_bot_api.reply_message(
                 event.reply_token,
-                TextSendMessage(text="กรุณาเลือกจากตัวเลือกที่กำหนดให้ (สร้างนัด หรือ ยกเลิกนัด)")
+                TextSendMessage(text="กรุณาเลือกจากตัวเลือกที่กำหนดให้ (สร้างนัด, ยกเลิกนัด หรือ ย้อนกลับ)")
             )
-            
-    elif session["state"] == "meeting_name":
-        session["meeting_name"] = text
-        session["state"] = "meeting_description"
-        print(session["meeting_name"])
-        line_bot_api.reply_message(
-                event.reply_token,
-                TextSendMessage(text="กรุณากรอกรายละเอียดการประชุม : ")
-            )
-
-    elif session["state"] == "meeting_description":
-        session["meeting_description"] = text
-        session["state"] = "meeting_summary"
-        print(session["meeting_description"])
-        
-        # สร้างข้อมูลการนัดหมาย
-        selected_pair = session["selected_pair"]
-        participants = [selected_pair["manager"]["name"], selected_pair["recruiter"]["name"]]
-        
-        meeting_info = {
-            "name": session["meeting_name"],
-            "description": session["meeting_description"],
-            "date": session["selected_date"],
-            "time": session["selected_time_slot"]["time"],
-            "duration": "30 นาที",
-            "participants": participants,
-            "created_at": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
-            "created_by": user_id
-        }
-        meeting_result = BulkEventRequest(
-                user_emails=session["emails"],
-                summary=session["meeting_name"],
-                description=session["meeting_description"],
-                location= f"{session.get('location')}",
-                start_time=session["start_time"],
-                end_time=session["end_time"],
-                attendees=[]
-        )
-        print(session.get('location'))  # เช็กค่า location ที่ได้จาก session
-        print(session.get('start_time'))  # เช็ก start_time
-        print(session.get('end_time'))    # เช็ก end_time
-        
-        # สร้างข้อความยืนยันการนัดหมาย
-        meeting_confirmation = create_meeting_confirmation(meeting_info)
-        
-        # ส่งข้อความยืนยันการนัดหมาย
-        line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(text=meeting_confirmation)
-        )
-        print(meeting_result.user_emails)
-        # สร้าง job_id ที่ไม่ซ้ำ เช่น จาก email + start_time
-        job_id = f"book_{'_'.join(meeting_result.user_emails)}_{meeting_result.start_time}"
-
-        # ป้องกันไม่ให้ job ซ้ำ
-        if not scheduler.get_job(job_id):
-            scheduler.add_job(
-                func=send_book_meeting,
-                args=[meeting_result],
-                trigger="date",
-                run_date=datetime.now() + timedelta(seconds=10),
-                id=job_id  # <- ใส่ job_id เพื่อป้องกันซ้ำ
-            )
-            print(f"✅ เพิ่ม job booking: {job_id}")
-        else:
-            print(f"⚠️ job '{job_id}' มีอยู่แล้ว ไม่เพิ่มซ้ำ")
-
-
-
-
-
-
-
-        #ส่งข้อมูลให้ไป api ที่ทำการ book ใน google calendar ผู้ใช้ตาม meeting_result ที่ส่งไป และส่งอีเมลให้ manager recruiter
-        # scheduler.add_job(
-        #         func=send_book_meeting,
-        #         args=[meeting_result],
-        #         trigger="date",
-        #         run_date=datetime.now() + timedelta(seconds=10)
-        #     )
-        
-        # รีเซ็ตสถานะแต่เก็บข้อมูลโปรไฟล์
-        profile_data = {k: session[k] for k in ["age", "exp", "eng_level", "location", "available_time_slots"] if k in session}
-        session.clear()
-        session.update(profile_data)
-        session["state"] = "initial"
-        session["profile_completed"] = True
+       
 
 def send_initial_options(reply_token_or_user_id):
-    """Send initial options with Quick Reply"""
-    items = [
-        QuickReplyButton(action=MessageAction(label="กรอกข้อมูล Manager", text="กรอกข้อมูล Manager")),
-        QuickReplyButton(action=MessageAction(label="วิธีการใช้", text="วิธีการใช้")),
-        QuickReplyButton(action=MessageAction(label="login(M&R)",
-                                             text="login(สำหรับ Manager & Recruiter)"))  
-  
-    ]
-    
-    quick_reply = QuickReply(items=items)
-    
+    """ส่งข้อความแนะนำ + Quick Reply"""
     message = TextSendMessage(
-        text="นี่คือ line chat นัดประชุมอัจฉริยะ หากต้องการใช้บริการกรุณาเลือกด้านล่าง",
-        quick_reply=quick_reply
+        text="📌 นี่คือ LINE Chat นัดประชุมอัจฉริยะ\nกรุณาเลือกเมนูด้านล่างเพื่อเริ่มใช้งาน:",
+        quick_reply=QuickReply(items=[
+            QuickReplyButton(action=MessageAction(label="กรอกข้อมูล Manager", text="กรอกข้อมูล Manager")),
+            QuickReplyButton(action=MessageAction(label="วิธีการใช้", text="วิธีการใช้")),
+            QuickReplyButton(action=MessageAction(label="login(M&R)", text="login(สำหรับ Manager & Recruiter)"))
+        ])
     )
-    
-    # Handle both reply_token and user_id
+
     if isinstance(reply_token_or_user_id, str) and reply_token_or_user_id.startswith("U"):
-        # It's a user_id
         line_bot_api.push_message(reply_token_or_user_id, message)
-        if reply_token_or_user_id in user_sessions:
-            user_sessions[reply_token_or_user_id]["state"] = "waiting_initial_choice"
     else:
-        # It's a reply_token
         line_bot_api.reply_message(reply_token_or_user_id, message)
 
+
+# สร้างฟังก์ชันใหม่สำหรับแสดงเฉพาะเมนู (ไม่มีข้อความแนะนำ)
+def send_menu_only(reply_token_or_user_id):
+    """ส่ง Quick Reply เมนูแบบสั้นๆ"""
+    message = TextSendMessage(
+        text=":>",  # ✅ ต้องมี text อย่างน้อย 1 ตัวอักษร
+        quick_reply=QuickReply(items=[
+            QuickReplyButton(action=MessageAction(label="กรอกข้อมูล Manager", text="กรอกข้อมูล Manager")),
+            QuickReplyButton(action=MessageAction(label="วิธีการใช้", text="วิธีการใช้")),
+            QuickReplyButton(action=MessageAction(label="login(M&R)", text="login(สำหรับ Manager & Recruiter)"))
+        ])
+    )
+
+    if isinstance(reply_token_or_user_id, str) and reply_token_or_user_id.startswith("U"):
+        line_bot_api.push_message(reply_token_or_user_id, message)
+    else:
+        line_bot_api.reply_message(reply_token_or_user_id, message)
+
+
+        
 def send_date_selection(reply_token_or_user_id, available_time_slots):
     """Send Quick Reply for date selection"""
     available_dates = []
@@ -803,6 +857,8 @@ def send_date_selection(reply_token_or_user_id, available_time_slots):
         message = TextSendMessage(
             text="ไม่พบวันที่ว่างในระบบ กรุณาติดต่อผู้ดูแลระบบ"
         )
+        if reply_token_or_user_id in user_sessions:
+            user_sessions[reply_token_or_user_id]["state"] = "initial"
     else:
         # สร้าง Quick Reply สำหรับเลือกวันที่
         items = [
@@ -843,8 +899,8 @@ def send_time_slots(reply_token_or_user_id, time_slots, selected_date):
         for i in range(1, len(slot_texts) + 1)
     ]
 
-    # เพิ่มปุ่ม 'ยกเลิก' เป็นปุ่มที่ 13
-    items.append(QuickReplyButton(action=MessageAction(label="ยกเลิก", text="ยกเลิก")))
+    # เปลี่ยนปุ่ม 'ยกเลิก' เป็น 'ย้อนกลับ'
+    items.append(QuickReplyButton(action=MessageAction(label="ย้อนกลับ", text="ย้อนกลับ")))
 
     quick_reply = QuickReply(items=items)
 
@@ -867,14 +923,14 @@ def send_pair_selection(reply_token, time_slot):
     for i, pair_detail in enumerate(pairs, start=1):
         message_text += f"   {i}.👥 {pair_detail['pair']}\n"
     
-    # แสดง quick reply สำหรับเลือกคู่ Manager-Recruiter (สูงสุด 13 รายการตามข้อจำกัดของ Line)
+    # แสดง quick reply สำหรับเลือกคู่ Manager-Recruiter (สูงสุด 12 รายการเพื่อเหลือที่สำหรับปุ่มย้อนกลับ)
     items = [
         QuickReplyButton(action=MessageAction(label=f"({i})", text=f"({i})"))
-        for i in range(1, min(len(pairs) + 1, 14))
+        for i in range(1, min(len(pairs) + 1, 13))
     ]
     
-    # เพิ่มตัวเลือกยกเลิก
-    items.append(QuickReplyButton(action=MessageAction(label="ยกเลิก", text="ยกเลิก")))
+    # เพิ่มปุ่มย้อนกลับ
+    items.append(QuickReplyButton(action=MessageAction(label="ย้อนกลับ", text="ย้อนกลับ")))
     
     quick_reply = QuickReply(items=items)
     
@@ -882,12 +938,13 @@ def send_pair_selection(reply_token, time_slot):
         reply_token,
         TextSendMessage(text=message_text, quick_reply=quick_reply)
     )
-
+    
 def send_meeting_confirmation(reply_token, meeting_summary):
     """Send meeting confirmation"""
     items = [
-        QuickReplyButton(action=MessageAction(label="สร้างนัด", text="สร้างนัด")),
-        QuickReplyButton(action=MessageAction(label="ยกเลิกนัด", text="ยกเลิกนัด"))
+        QuickReplyButton(action=MessageAction(label="ยืนยันนัด", text="สร้างนัด")),
+        QuickReplyButton(action=MessageAction(label="ยกเลิกนัด", text="ยกเลิกนัด")),
+        QuickReplyButton(action=MessageAction(label="ย้อนกลับ", text="ย้อนกลับ"))  # เพิ่มปุ่มย้อนกลับ
     ]
     
     quick_reply = QuickReply(items=items)
