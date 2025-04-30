@@ -20,7 +20,7 @@ from typing import Optional
 import logging
 from linebot import LineBotApi, WebhookHandler
 import time as timeTest
-
+import holidays
 
 # Local application
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
@@ -238,10 +238,14 @@ def get_multiple_users_events(request: UsersRequest):
                 
                 service = build('calendar', 'v3', credentials=creds)
                 
-                # กำหนดช่วงเวลาในการดึงข้อมูล
-                time_min = request.start_date + "T00:00:00Z" if request.start_date else datetime.utcnow().isoformat() + "Z"
-                time_max = request.end_date + "T23:59:59Z" if request.end_date else (datetime.utcnow() + timedelta(days=7)).isoformat() + "Z"
-                
+                # ดึง start_time และ end_time จาก request ถ้าไม่มีให้ใช้ default
+                start_time_str = request.start_time or "00:00:00"
+                end_time_str = request.end_time or "23:59:59"
+
+                # เอา date + time รวมเป็นรูปแบบ ISO
+                time_min = f"{request.start_date}T{start_time_str}+07:00" if request.start_date else datetime.utcnow().isoformat() + "Z"
+                time_max = f"{request.end_date}T{end_time_str}+07:00" if request.end_date else (datetime.utcnow() + timedelta(days=7)).isoformat() + "Z"
+
                 print(f"กำลังดึงข้อมูลสำหรับ {user.email} จาก {time_min} ถึง {time_max}")
                 
                 # ดึงข้อมูลกิจกรรม
@@ -785,12 +789,23 @@ def get_available_time_slots(request: ManagerRecruiter):
         end_datetime = start_datetime + timedelta(days=days_to_check)
 
     time_max = end_datetime.strftime("%Y-%m-%dT%H:%M:%SZ")
+    years_to_check = list(range(start_datetime.year, end_datetime.year + 1))
+    THAI_HOLIDAYS = holidays.Thailand(years=years_to_check)
     
+
     # สร้างรายการวันที่จะตรวจสอบ
     date_list = []
     current_date = start_datetime.date()
+    # while current_date <= end_datetime.date():
+    #     date_list.append(current_date)
+    #     current_date += timedelta(days=1)
     while current_date <= end_datetime.date():
-        date_list.append(current_date)
+        is_weekend = current_date.weekday() >= 5  # เสาร์=5, อาทิตย์=6
+        is_holiday = current_date in THAI_HOLIDAYS
+        
+        if not is_weekend and (request.include_holidays or not is_holiday):
+            date_list.append(current_date)
+        
         current_date += timedelta(days=1)
     
     # ดึงข้อมูลกิจกรรมสำหรับ Manager
