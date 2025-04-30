@@ -85,6 +85,7 @@ def handle_message(event):
             
             # Keep state as waiting_initial_choice
             session["state"] = "waiting_initial_choice"
+
         elif text == "login(สำหรับ Manager & Recruiter)":          
             session["state"] = "login_email"
             line_bot_api.reply_message(
@@ -94,8 +95,6 @@ def handle_message(event):
         else:
             # If user enters something else while waiting for choice
             send_initial_options(event.reply_token)
-
-
 
     elif session["state"] == "login_email":  
         def background_login_and_push(user_id, user_email):
@@ -241,16 +240,6 @@ def handle_message(event):
                     event.reply_token,
                     TextSendMessage(text="รูปแบบอีเมลไม่ถูกต้อง กรุณาลองใหม่")
                 )
-
-
-
-
-
-
-
-
-
-
 
     # ================= PROFILE FLOW =================
     # Age input
@@ -687,6 +676,7 @@ def handle_message(event):
                 event.reply_token,
                 TextSendMessage(text="กรุณากรอกรายละเอียดการประชุม : ")
             )
+
     elif session["state"] == "meeting_description":
         session["meeting_description"] = text
         session["state"] = "meeting_summary"
@@ -727,29 +717,36 @@ def handle_message(event):
             event.reply_token,
             TextSendMessage(text=meeting_confirmation)
         )
-        def send_book_meeting(meeting_result):
-            try:
-                print("🚀 POST ข้อมูล:", meeting_result.dict())
-                print(base_url)
-                response = requests.post(
-                    f"{base_url}/events/create-bulk",
-                    json=meeting_result.dict(),
-                    headers={"Content-Type": "application/json"},
-                    timeout=30
-                )
-                print("✅ POST สำเร็จ:", response.status_code)
-            except Exception as e:
-                print("❌ POST ล้มเหลว:", str(e))
+        print(meeting_result.user_emails)
+        # สร้าง job_id ที่ไม่ซ้ำ เช่น จาก email + start_time
+        job_id = f"book_{'_'.join(meeting_result.user_emails)}_{meeting_result.start_time}"
+
+        # ป้องกันไม่ให้ job ซ้ำ
+        if not scheduler.get_job(job_id):
+            scheduler.add_job(
+                func=send_book_meeting,
+                args=[meeting_result],
+                trigger="date",
+                run_date=datetime.now() + timedelta(seconds=10),
+                id=job_id  # <- ใส่ job_id เพื่อป้องกันซ้ำ
+            )
+            print(f"✅ เพิ่ม job booking: {job_id}")
+        else:
+            print(f"⚠️ job '{job_id}' มีอยู่แล้ว ไม่เพิ่มซ้ำ")
+
+
+
+
 
 
 
         #ส่งข้อมูลให้ไป api ที่ทำการ book ใน google calendar ผู้ใช้ตาม meeting_result ที่ส่งไป และส่งอีเมลให้ manager recruiter
-        scheduler.add_job(
-                func=send_book_meeting,
-                args=[meeting_result],
-                trigger="date",
-                run_date=datetime.now() + timedelta(seconds=10)
-            )
+        # scheduler.add_job(
+        #         func=send_book_meeting,
+        #         args=[meeting_result],
+        #         trigger="date",
+        #         run_date=datetime.now() + timedelta(seconds=10)
+        #     )
         
         # รีเซ็ตสถานะแต่เก็บข้อมูลโปรไฟล์
         profile_data = {k: session[k] for k in ["age", "exp", "eng_level", "location", "available_time_slots"] if k in session}
@@ -942,7 +939,20 @@ def create_meeting_confirmation(meeting_info):
     
     return confirmation
 
-
+###### use api #######
+def send_book_meeting(meeting_result):
+            try:
+                print("🚀 POST ข้อมูล:", meeting_result.dict())
+                print(base_url)
+                response = requests.post(
+                    f"{base_url}/events/create-bulk",
+                    json=meeting_result.dict(),
+                    headers={"Content-Type": "application/json"},
+                    timeout=30 # ถ้า timeout น้อยจะขึ้น timeout แล้วก็จะไปบุ๊คใน calendar 2 ครั้ง
+                )
+                print("✅ POST สำเร็จ:", response.status_code)
+            except Exception as e:
+                print("❌ POST ล้มเหลว:", str(e))
 
 
 if __name__ == "__main__":

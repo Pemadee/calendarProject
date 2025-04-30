@@ -11,8 +11,10 @@ class UserCalendar(BaseModel):
 # โมเดลสำหรับรับข้อมูลผู้ใช้หลายคน
 class UsersRequest(BaseModel):
     users: List[UserCalendar] #List ของ UserCalendar
-    start_date: Optional[str] = None
-    end_date: Optional[str] = None
+    start_date: Optional[str] = None  # เช่น "2025-05-29"
+    end_date: Optional[str] = None    # เช่น "2025-05-30"
+    start_time: Optional[str] = None  # เช่น "18:30:00"
+    end_time: Optional[str] = None    # เช่น "19:00:00"
 
 # โมเดลสำหรับการนัดหมายพร้อมกันหลายคน
 class BulkEventRequest(BaseModel):
@@ -34,6 +36,8 @@ class ManagerRecruiter(BaseModel):
     start_date: Optional[str] = None
     end_date: Optional[str] = None
     time_period: Optional[str] = None
+    include_holidays: Optional[bool] = True # ถ้าไม่ใช้ก็ false
+
 
 # โมเดลสำหรับรับข้อมูล Manger Recruiter
 class getManagerRecruiter(BaseModel):
