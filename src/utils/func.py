@@ -16,8 +16,8 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 import pandas as pd
 from email.mime.text import MIMEText
-
-
+from collections import defaultdict
+import threading
 
 # Local application
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
@@ -29,6 +29,10 @@ thread_pool = ThreadPoolExecutor(max_workers=20)
 base_url = os.environ.get('BASE_URL')
 EMAIL_SENDER = os.getenv("EMAIL_to_SEND_MESSAGE")
 EMAIL_PASSWORD = os.getenv("PASSWORD_EMAIL")
+
+# สร้าง lock แยกตามอีเมล
+email_locks = defaultdict(threading.Lock)
+
 
 def is_token_valid(user_email: str) -> bool:
     """ตรวจสอบว่า token ของผู้ใช้ยังใช้งานได้หรือไม่"""
@@ -79,11 +83,57 @@ def is_token_valid(user_email: str) -> bool:
         print(f"เกิดข้อผิดพลาดในการตรวจสอบ token สำหรับ {user_email}: {str(e)}")
         return False
 
+# def get_credentials(user_email: str):
+#     """รับ credentials สำหรับการเข้าถึง Google Calendar API"""
+#     token_path = os.path.join(TOKEN_DIR, f'token_{user_email}.json')
+#     creds = None
+    
+#     # ถ้ามีไฟล์ token อยู่แล้ว ให้ลองโหลด
+#     if os.path.exists(token_path):
+#         try:
+#             with open(token_path, 'r') as token_file:
+#                 creds = Credentials.from_authorized_user_info(json.load(token_file), SCOPES)
+#         except Exception as e:
+#             print(f"เกิดข้อผิดพลาดในการโหลด token: {str(e)}")
+    
+#     # ถ้าไม่มี token หรือไม่สามารถใช้งานได้ ให้สร้างใหม่
+#     if not creds or not creds.valid:
+#         if creds and creds.expired and creds.refresh_token:
+#             creds.refresh(GoogleRequest())
+#         else:
+#             # สร้าง flow แบบ web application
+#             flow = InstalledAppFlow.from_client_secrets_file(CLIENT_SECRET_FILE, SCOPES)
+            
+#             # กำหนด redirect_uri อย่างชัดเจน
+            
+#             flow.redirect_uri = f"{base_url}/oauth2callback"
+            
+#             # สร้าง authorization URL พร้อมกำหนด state ให้เก็บ email
+#             auth_url, _ = flow.authorization_url(
+#                 access_type='offline',
+#                 prompt='consent',
+#                 include_granted_scopes='true',
+#                 state=user_email  # เก็บ email ใน state เพื่อใช้อ้างอิงตอน callback
+#             )
+            
+#             # ส่งกลับ URL และสถานะที่ต้องการการยืนยันตัวตน
+#             return {
+#                 "requires_auth": True,
+#                 "auth_url": auth_url,
+#                 "redirect_uri": flow.redirect_uri
+#             }
+        
+#         # บันทึก token ใหม่
+#         with open(token_path, 'w') as token_file:
+#             token_file.write(creds.to_json())
+            
+#     return creds
+
 def get_credentials(user_email: str):
     """รับ credentials สำหรับการเข้าถึง Google Calendar API"""
     token_path = os.path.join(TOKEN_DIR, f'token_{user_email}.json')
     creds = None
-    
+
     # ถ้ามีไฟล์ token อยู่แล้ว ให้ลองโหลด
     if os.path.exists(token_path):
         try:
@@ -91,39 +141,45 @@ def get_credentials(user_email: str):
                 creds = Credentials.from_authorized_user_info(json.load(token_file), SCOPES)
         except Exception as e:
             print(f"เกิดข้อผิดพลาดในการโหลด token: {str(e)}")
-    
-    # ถ้าไม่มี token หรือไม่สามารถใช้งานได้ ให้สร้างใหม่
+
+    # ถ้าไม่มี token หรือไม่ valid → ต้องพิจารณา refresh หรือ auth ใหม่
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
-            creds.refresh(GoogleRequest())
+            try:
+                # 🔐 ล็อกเฉพาะ email นี้เท่านั้น
+                with email_locks[user_email]:
+                    print(f"🔄 พยายามรีเฟรช token สำหรับ {user_email}")
+                    creds.refresh(GoogleRequest())
+
+                # ✅ save เฉพาะถ้ามี refresh_token ใหม่
+                if creds.refresh_token:
+                    with open(token_path, 'w') as token_file:
+                        token_file.write(creds.to_json())
+                    print(f"✅ รีเฟรช token สำเร็จสำหรับ {user_email}")
+                else:
+                    print(f"⚠️ ไม่มี refresh_token หลังรีเฟรช — ไม่บันทึก")
+            except Exception as e:
+                print(f"❌ รีเฟรช token ล้มเหลว: {str(e)}")
+                return _get_auth_redirect(user_email)
         else:
-            # สร้าง flow แบบ web application
-            flow = InstalledAppFlow.from_client_secrets_file(CLIENT_SECRET_FILE, SCOPES)
-            
-            # กำหนด redirect_uri อย่างชัดเจน
-            
-            flow.redirect_uri = f"{base_url}/oauth2callback"
-            
-            # สร้าง authorization URL พร้อมกำหนด state ให้เก็บ email
-            auth_url, _ = flow.authorization_url(
-                access_type='offline',
-                prompt='consent',
-                include_granted_scopes='true',
-                state=user_email  # เก็บ email ใน state เพื่อใช้อ้างอิงตอน callback
-            )
-            
-            # ส่งกลับ URL และสถานะที่ต้องการการยืนยันตัวตน
-            return {
-                "requires_auth": True,
-                "auth_url": auth_url,
-                "redirect_uri": flow.redirect_uri
-            }
-        
-        # บันทึก token ใหม่
-        with open(token_path, 'w') as token_file:
-            token_file.write(creds.to_json())
-            
+            return _get_auth_redirect(user_email)
+
     return creds
+
+def _get_auth_redirect(user_email: str):
+    flow = InstalledAppFlow.from_client_secrets_file(CLIENT_SECRET_FILE, SCOPES)
+    flow.redirect_uri = f"{base_url}/oauth2callback"
+    auth_url, _ = flow.authorization_url(
+        access_type='offline',
+        prompt='consent',
+        include_granted_scopes='true',
+        state=user_email
+    )
+    return {
+        "requires_auth": True,
+        "auth_url": auth_url,
+        "redirect_uri": flow.redirect_uri
+    }
 
 def get_calendar_events(user_email: str, calendar_id: str, start_date: str, end_date: str):
     """ดึงข้อมูลกิจกรรมจาก Google Calendar"""
