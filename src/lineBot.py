@@ -53,11 +53,14 @@ def handle_message(event):
         session["state"] = "initial"
         send_initial_options(event.reply_token)
         return
-    
-    # แก้ส่วนนี้จากประมาณบรรทัด 70
-    if session["state"] == "initial" or (text not in ["กรอกข้อมูล Manager", "วิธีการใช้", "login(สำหรับ Manager & Recruiter)"] and session["state"] not in ["waiting_initial_choice", "profile_age", "profile_exp", "profile_eng_level", "profile_location", "profile_confirm", "select_date", "select_time_slot", "select_pair", "confirm", "meeting_name", "meeting_description", "meeting_summary", "login_email"]):
-        # เปลี่ยนจาก waiting_initial_choice เป็น initial เพื่อไม่ให้เกิดการทำงานซ้ำซ้อน
-        session["state"] = "initial"  
+
+    # ✅ แก้ตรงนี้: เปลี่ยนจาก if → elif และแยกให้ชัดเจน
+    elif text not in ["กรอกข้อมูล Manager", "วิธีการใช้", "login(สำหรับ Manager & Recruiter)"] and session["state"] not in [
+        "profile_age", "profile_exp", "profile_eng_level", "profile_location",
+        "profile_confirm", "select_date", "select_time_slot", "select_pair",
+        "confirm", "meeting_name", "meeting_description", "meeting_summary", "login_email"
+    ]:
+        session["state"] = "initial"
         send_initial_options(event.reply_token)
         return
 
@@ -76,7 +79,10 @@ def handle_message(event):
                 event.reply_token,
                 TextSendMessage(text=usage_text)
             )
-            # ไม่ต้องเรียก send_initial_options อีก
+            session.clear()
+            session["state"] = "initial"
+            send_menu_only(user_id)
+
             return
         elif text == "login(สำหรับ Manager & Recruiter)":          
             session["state"] = "login_email"
@@ -444,8 +450,8 @@ def handle_message(event):
         if text == "ยืนยัน":
             line_bot_api.reply_message(
                 event.reply_token,
-                TextSendMessage(text="กำลังค้นหาเวลาว่าง โปรดรอสักครู่...")
-            )
+                TextSendMessage(text="กำลังค้นหาเวลาว่าง โปรดรอสักครู่..."))
+           
             def background_post_and_push(user_id, session_data):
                 
                 try:
@@ -501,7 +507,7 @@ def handle_message(event):
                 trigger="date",
                 run_date=datetime.now() + timedelta(seconds=2)
             )
-   
+        
               
         elif text == "ยกเลิก":
             # Reset session and go back to initial state
@@ -887,51 +893,40 @@ def handle_message(event):
     #     session["profile_completed"] = True
 
 def send_initial_options(reply_token_or_user_id):
-    """Send initial options with Quick Reply"""
-    items = [
-        QuickReplyButton(action=MessageAction(label="กรอกข้อมูล Manager", text="กรอกข้อมูล Manager")),
-        QuickReplyButton(action=MessageAction(label="วิธีการใช้", text="วิธีการใช้")),
-        QuickReplyButton(action=MessageAction(label="login(M&R)",
-                                             text="login(สำหรับ Manager & Recruiter)"))  
-    ]
-    
-    quick_reply = QuickReply(items=items)
-    
+    """ส่งข้อความแนะนำ + Quick Reply"""
     message = TextSendMessage(
-        text="นี่คือ line chat นัดประชุมอัจฉริยะ หากต้องการใช้บริการกรุณาเลือกด้านล่าง",
-        quick_reply=quick_reply
+        text="📌 นี่คือ LINE Chat นัดประชุมอัจฉริยะ\nกรุณาเลือกเมนูด้านล่างเพื่อเริ่มใช้งาน:",
+        quick_reply=QuickReply(items=[
+            QuickReplyButton(action=MessageAction(label="กรอกข้อมูล Manager", text="กรอกข้อมูล Manager")),
+            QuickReplyButton(action=MessageAction(label="วิธีการใช้", text="วิธีการใช้")),
+            QuickReplyButton(action=MessageAction(label="login(M&R)", text="login(สำหรับ Manager & Recruiter)"))
+        ])
     )
-    
-    # Handle both reply_token and user_id
+
     if isinstance(reply_token_or_user_id, str) and reply_token_or_user_id.startswith("U"):
-        # It's a user_id
         line_bot_api.push_message(reply_token_or_user_id, message)
-        if reply_token_or_user_id in user_sessions:
-            user_sessions[reply_token_or_user_id]["state"] = "initial"  # เปลี่ยนจาก waiting_initial_choice เป็น initial
     else:
-        # It's a reply_token
         line_bot_api.reply_message(reply_token_or_user_id, message)
 
+
 # สร้างฟังก์ชันใหม่สำหรับแสดงเฉพาะเมนู (ไม่มีข้อความแนะนำ)
-def send_menu_only(user_id):
-    """Send only menu options without introduction text"""
-    items = [
-        QuickReplyButton(action=MessageAction(label="กรอกข้อมูล Manager", text="กรอกข้อมูล Manager")),
-        QuickReplyButton(action=MessageAction(label="วิธีการใช้", text="วิธีการใช้")),
-        QuickReplyButton(action=MessageAction(label="login(M&R)",
-                                             text="login(สำหรับ Manager & Recruiter)"))  
-    ]
-    
-    quick_reply = QuickReply(items=items)
-    
+def send_menu_only(reply_token_or_user_id):
+    """ส่ง Quick Reply เมนูแบบสั้นๆ"""
     message = TextSendMessage(
-        text="เลือกเมนู:",
-        quick_reply=quick_reply
+        text=":>",  # ✅ ต้องมี text อย่างน้อย 1 ตัวอักษร
+        quick_reply=QuickReply(items=[
+            QuickReplyButton(action=MessageAction(label="กรอกข้อมูล Manager", text="กรอกข้อมูล Manager")),
+            QuickReplyButton(action=MessageAction(label="วิธีการใช้", text="วิธีการใช้")),
+            QuickReplyButton(action=MessageAction(label="login(M&R)", text="login(สำหรับ Manager & Recruiter)"))
+        ])
     )
-    
-    line_bot_api.push_message(user_id, message)
-    if user_id in user_sessions:
-        user_sessions[user_id]["state"] = "initial"
+
+    if isinstance(reply_token_or_user_id, str) and reply_token_or_user_id.startswith("U"):
+        line_bot_api.push_message(reply_token_or_user_id, message)
+    else:
+        line_bot_api.reply_message(reply_token_or_user_id, message)
+
+
         
 def send_date_selection(reply_token_or_user_id, available_time_slots):
     """Send Quick Reply for date selection"""
