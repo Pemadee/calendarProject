@@ -10,8 +10,10 @@ from test import *
 from config import *
 from utils.func import *
 from api.endpoints import *
-
-
+from utils.scheduler_instance import scheduler
+import utils.auto_refresh_jobs 
+from models.token_model import init_db
+init_db()  # ✅ เพิ่มตรงนี้
 # ลบและสร้างโฟลเดอร์ tokens ใหม่เพื่อหลีกเลี่ยงปัญหา
 try:
     if os.path.exists(TOKEN_DIR):
