@@ -20,12 +20,12 @@ from api.endpoints import *
 from models.schemas import BulkEventRequest
 from linebot.models import TemplateSendMessage, ButtonsTemplate, URIAction
 from linebot.models import FlexSendMessage
+from src.utils.scheduler_instance import scheduler
 
 
 app = FastAPI()
 
 load_dotenv()
-scheduler = BackgroundScheduler()
 scheduler.start()
 
 # User session data
@@ -1012,5 +1012,4 @@ def send_book_meeting(meeting_result):
                 print("❌ POST ล้มเหลว:", str(e))
 
 
-if __name__ == "__main__":
-    uvicorn.run(app, host="localhost", port=8001)
+

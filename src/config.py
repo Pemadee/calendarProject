@@ -1,13 +1,24 @@
 import os
+import json
+from dotenv import load_dotenv
 
-# โฟลเดอร์เก็บไฟล์ token
+load_dotenv()
+
 TOKEN_DIR = 'tokens'
-# กำหนด scope การเข้าถึง Google Calendar
-SCOPES = [
-    'https://www.googleapis.com/auth/calendar',
-    'https://www.googleapis.com/auth/calendar.readonly',
-    'https://www.googleapis.com/auth/userinfo.email',
-    'openid'
-]
-#file เก็บข้อมูล client secret ของ OAuth
+
 CLIENT_SECRET_FILE = os.getenv("CLIENT_SECRET_FILE")
+
+def load_client_secrets(file_path):
+    with open(file_path, "r") as f:
+        data = json.load(f)
+    return data["web"]["client_id"], data["web"]["client_secret"]
+
+
+CLIENT_ID, CLIENT_SECRET = load_client_secrets(CLIENT_SECRET_FILE)
+
+SCOPES = [
+    "https://www.googleapis.com/auth/calendar",
+    "https://www.googleapis.com/auth/calendar.readonly",
+    "https://www.googleapis.com/auth/userinfo.email",
+    "openid"
+]
