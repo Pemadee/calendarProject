@@ -178,9 +178,9 @@ def handle_message(event):
             )
 
             # reset session
-            session.clear()
-            session["state"] = "initial"
-            send_menu_only(user_id)
+            # session.clear()
+            # session["state"] = "initial"
+            # send_menu_only(user_id)
         else:
             line_bot_api.reply_message(
                 event.reply_token,
@@ -446,9 +446,18 @@ def handle_message(event):
     # Profile confirmation
     elif session["state"] == "profile_confirm":
         if text == "ยืนยัน":
+            if "selected_pair" in session:
+                del session["selected_pair"]
+            if "emails" in session:
+                del session["emails"]
+            if "start_time" in session:
+                del session["start_time"]
+            if "end_time" in session:
+                del session["end_time"]
+                       
             line_bot_api.reply_message(
                 event.reply_token,
-                TextSendMessage(text="กำลังค้นหาเวลาว่าง โปรดรอสักครู่..."))
+                TextSendMessage(text="กำลังค้นหาวันเวลาว่าง โปรดรอสักครู่..."))
            
             def background_post_and_push(user_id, session_data):
                 
@@ -670,11 +679,24 @@ def handle_message(event):
                 # แยกช่วงเวลาเริ่มต้นและสิ้นสุด
                 time_range = session["selected_time_slot"]["time"]
                 start_time, end_time = time_range.split("-")
-                
-                # สร้างรูปแบบ ISO datetime และเก็บใน session
+                               # สร้างรูปแบบ ISO datetime และเก็บใน session
                 session["start_time"] = f"{iso_date}T{start_time}:00+07:00"
                 session["end_time"] = f"{iso_date}T{end_time}:00+07:00"
                 print(f"✅ Start time: {session['start_time']}, End time: {session['end_time']}")
+                
+                # สร้างข้อมูล JSON สำหรับส่งออก
+                session["booking_payload"] = {
+                    "users": [
+                        {"email": selected_pair["manager"]["email"]},
+                        {"email": selected_pair["recruiter"]["email"]}
+                    ],
+                    "start_date": iso_date,
+                    "end_date": iso_date,
+                    "start_time": start_time.strip(),
+                    "end_time": end_time.strip()
+                }
+
+                print("📦 Booking Payload JSON:", json.dumps(session["booking_payload"], indent=2))
                 
                 session["state"] = "confirm"
                 

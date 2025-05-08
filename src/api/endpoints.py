@@ -47,7 +47,7 @@ app.add_middleware(
 )
 
 
-REDIRECT_URI = 'http://localhost:8080/'  # กำหนด redirect URI 
+REDIRECT_URI = 'http://localhost:8000/'  # กำหนด redirect URI 
 AUTH_PORT = 8080  # พอร์ต redirect
 FILE_PATH = os.path.join(os.path.dirname(__file__), '..', '..', os.getenv("FILE_PATH"))
 # ปอดการแจ้งเตือน INFO:googleapiclient.discovery_cache:file_cache is only supported with oauth2client<4.0.0

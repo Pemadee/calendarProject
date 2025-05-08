@@ -12,10 +12,5 @@ google-auth-oauthlib
 python-multipart
 aiohttp
 pytz
-<<<<<<< HEAD
+apscheduler
 aiofiles
-apscheduler
-openpyxl
-=======
-apscheduler
->>>>>>> c6862a96a51a0a23730cce044e87df8b1fcfd91c
