@@ -1556,7 +1556,6 @@ def get_available_timeslots(request: DateRequest):
         headers={"Response-Type": "object"}
     )
 
-
 # API 3: ดึงรายละเอียดของคู่ที่ว่างในช่วงเวลาที่เลือก
 @app.post("/events/available-pairs")
 def get_available_pairs(request: TimeSlotRequest):

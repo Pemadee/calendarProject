@@ -35,7 +35,7 @@ thread_pool = ThreadPoolExecutor(max_workers=20)
 base_url = os.environ.get('BASE_URL')
 EMAIL_SENDER = os.getenv("EMAIL_to_SEND_MESSAGE")
 EMAIL_PASSWORD = os.getenv("PASSWORD_EMAIL")
-
+FILE_PATH = os.path.join(os.path.dirname(__file__), '..', '..', os.getenv("FILE_PATH"))
 # สร้าง lock แยกตามอีเมล
 email_locks = defaultdict(threading.Lock)
 
@@ -401,7 +401,57 @@ def refresh_token_safe(user_email: str):
 
     return creds
 
+# เพิ่มฟังก์ชันสำหรับการค้นหาอีเมลจาก Excel
 
+def find_emails_from_name_pair(name_pair):
+    """
+    รับชื่อในรูปแบบ "name1-name2" และค้นหาอีเมลจาก Excel
+    
+    Args:
+        name_pair (str): ชื่อในรูปแบบ "name1-name2"
+        
+    Returns:
+        List[str]: รายการอีเมลที่ค้นพบ (จะมี 2 อีเมล)
+    """
+    # อ่านไฟล์ Excel
+    try:
+        # ปรับ path ตามที่เก็บไฟล์จริง
+        excel_path = str(FILE_PATH)  
+        df = pd.read_excel(excel_path)
+        
+        # ตรวจสอบว่ามีคอลัมน์ที่ต้องการหรือไม่
+        if 'M' not in df.columns or 'R' not in df.columns or 'Email' not in df.columns:
+            raise ValueError("ไม่พบคอลัมน์ที่จำเป็น (M, R, Email) ในไฟล์ Excel")
+        
+        # แยกชื่อ
+        try:
+            name1, name2 = name_pair.split('-')
+        except ValueError:
+            raise ValueError(f"รูปแบบชื่อไม่ถูกต้อง: {name_pair} (ต้องเป็น 'name1-name2')")
+        
+        # เก็บอีเมลที่พบ
+        emails = []
+        
+        # ค้นหา name1 ในคอลัมน์ M
+        email1_row = df[df['M'] == name1]
+        if not email1_row.empty and 'Email' in email1_row.columns:
+            email1 = email1_row.iloc[0]['Email']
+            emails.append(email1)
+        else:
+            raise ValueError(f"ไม่พบอีเมลสำหรับชื่อ {name1} ในคอลัมน์ M")
+        
+        # ค้นหา name2 ในคอลัมน์ R
+        email2_row = df[df['R'] == name2]
+        if not email2_row.empty and 'Email' in email2_row.columns:
+            email2 = email2_row.iloc[0]['Email']
+            emails.append(email2)
+        else:
+            raise ValueError(f"ไม่พบอีเมลสำหรับชื่อ {name2} ในคอลัมน์ R")
+        
+        return emails
+        
+    except Exception as e:
+        raise Exception(f"เกิดข้อผิดพลาดในการอ่านข้อมูลจาก Excel: {str(e)}")
 
 
 
