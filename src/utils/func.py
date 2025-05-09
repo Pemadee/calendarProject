@@ -16,8 +16,14 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 import pandas as pd
 from email.mime.text import MIMEText
-
-
+from collections import defaultdict
+import threading
+from src.utils.token_db import *
+from src.models.token_model import SessionLocal
+from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request as GoogleRequest
+from src.config import CLIENT_ID, CLIENT_SECRET, SCOPES
+from datetime import datetime
 
 # Local application
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
@@ -30,107 +36,126 @@ base_url = os.environ.get('BASE_URL')
 EMAIL_SENDER = os.getenv("EMAIL_to_SEND_MESSAGE")
 EMAIL_PASSWORD = os.getenv("PASSWORD_EMAIL")
 
-def is_token_valid(user_email: str) -> bool:
-    """ตรวจสอบว่า token ของผู้ใช้ยังใช้งานได้หรือไม่"""
-    token_path = os.path.join(TOKEN_DIR, f'token_{user_email}.json')
-    
-    if not os.path.exists(token_path):
-        print(f"ไม่พบไฟล์ token สำหรับ {user_email}")
-        return False
-    
-    try:
-        with open(token_path, 'r') as token_file:
-            token_data = json.load(token_file)
-            
-            if not token_data:
-                print(f"ข้อมูล token ว่างเปล่าสำหรับ {user_email}")
-                return False
-                
-            # ตรวจสอบว่า refresh_token มีอยู่ในข้อมูล
-            if 'refresh_token' not in token_data:
-                print(f"ไม่พบ refresh_token สำหรับ {user_email} ในข้อมูล token")
-                return False
-                
-            # สร้าง credentials จาก token
-            creds = Credentials.from_authorized_user_info(token_data, SCOPES)
-            
-            # ตรวจสอบว่า token ยังใช้งานได้
-            if creds.valid:
-                print(f"Token ยังใช้งานได้สำหรับ {user_email}")
+# สร้าง lock แยกตามอีเมล
+email_locks = defaultdict(threading.Lock)
 
-                return True
-                
-            # ถ้า token หมดอายุแต่มี refresh_token
-            if creds.expired and creds.refresh_token:
-                try:
-                    creds.refresh(GoogleRequest())
-                    # บันทึก token ที่รีเฟรชแล้ว
-                    with open(token_path, 'w') as token:
-                        token.write(creds.to_json())
-                    print(f"รีเฟรช token สำเร็จสำหรับ {user_email}")
-                    return True
-                except Exception as e:
-                    print(f"ไม่สามารถรีเฟรช token ได้สำหรับ {user_email}: {str(e)}")
-                    return False
-            
-            return False
-            
-    except Exception as e:
-        print(f"เกิดข้อผิดพลาดในการตรวจสอบ token สำหรับ {user_email}: {str(e)}")
+
+def is_token_valid(user_email: str) -> bool:
+    """ตรวจสอบว่า token ของผู้ใช้ยังใช้งานได้หรือไม่ (เช็คจาก DB)"""
+    token_entry = get_token(user_email)
+    if not token_entry:
+        print(f"❌ ไม่พบ token ในระบบสำหรับ {user_email}")
         return False
+
+    creds = Credentials(
+        token=token_entry.access_token,
+        refresh_token=token_entry.refresh_token,
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id=CLIENT_ID,
+        client_secret=CLIENT_SECRET,
+        scopes=SCOPES
+    )
+
+    if creds.valid:
+        print(f"✅ Token ยังใช้งานได้สำหรับ {user_email}")
+        return True
+
+    if creds.expired and creds.refresh_token:
+        try:
+            creds.refresh(GoogleRequest())
+            update_token(
+                email=user_email,
+                access_token=creds.token,
+                refresh_token=creds.refresh_token,
+                expiry=creds.expiry
+            )
+            print(f"🔄 รีเฟรช token สำเร็จสำหรับ {user_email}")
+            return True
+        except Exception as e:
+            print(f"❌ รีเฟรช token ไม่สำเร็จ: {str(e)}")
+            return False
+
+    print(f"❌ Token หมดอายุและไม่มี refresh_token สำหรับ {user_email}")
+    return False
 
 def get_credentials(user_email: str):
     """รับ credentials สำหรับการเข้าถึง Google Calendar API"""
-    token_path = os.path.join(TOKEN_DIR, f'token_{user_email}.json')
     creds = None
     
-    # ถ้ามีไฟล์ token อยู่แล้ว ให้ลองโหลด
-    if os.path.exists(token_path):
+    # ดึงข้อมูล token จาก DB
+    token_entry = get_token(user_email)
+    
+    if token_entry:
         try:
-            with open(token_path, 'r') as token_file:
-                creds = Credentials.from_authorized_user_info(json.load(token_file), SCOPES)
+            creds = Credentials(
+                token=token_entry.access_token,
+                refresh_token=token_entry.refresh_token,
+                token_uri="https://oauth2.googleapis.com/token",
+                client_id=CLIENT_ID,
+                client_secret=CLIENT_SECRET,
+                scopes=SCOPES
+            )
         except Exception as e:
             print(f"เกิดข้อผิดพลาดในการโหลด token: {str(e)}")
-    
-    # ถ้าไม่มี token หรือไม่สามารถใช้งานได้ ให้สร้างใหม่
+
+    # ถ้าไม่มี token หรือไม่ valid → ต้องพิจารณา refresh หรือ auth ใหม่
     if not creds or not creds.valid:
+        if creds:
+            print(f"😐 Token expired: {creds.expired}, Has refresh_token: {bool(creds.refresh_token)}")
         if creds and creds.expired and creds.refresh_token:
-            creds.refresh(GoogleRequest())
+            try:
+                with email_locks[user_email]:
+                    print(f"🔄 พยายามรีเฟรช token สำหรับ {user_email}")
+                    creds.refresh(GoogleRequest())
+                if creds.refresh_token:
+                    # บันทึก token ที่รีเฟรชแล้วลง DB
+                    update_token(
+                        email=user_email,
+                        access_token=creds.token,
+                        refresh_token=creds.refresh_token,
+                        expiry=creds.expiry
+                    )
+                    print(f"✅ รีเฟรช token สำเร็จสำหรับ {user_email}")
+                else:
+                    print("⚠️ ไม่มี refresh_token หลัง refresh — อาจหมดสิทธิ์")
+            except Exception as e:
+                if 'invalid_grant' in str(e):
+                    print("💥 invalid_grant — เวลาระบบคลาด หรือ token ใช้ไม่ได้")
+                return _get_auth_redirect(user_email)
         else:
-            # สร้าง flow แบบ web application
-            flow = InstalledAppFlow.from_client_secrets_file(CLIENT_SECRET_FILE, SCOPES)
-            
-            # กำหนด redirect_uri อย่างชัดเจน
-            
-            flow.redirect_uri = f"{base_url}/oauth2callback"
-            
-            # สร้าง authorization URL พร้อมกำหนด state ให้เก็บ email
-            auth_url, _ = flow.authorization_url(
-                access_type='offline',
-                prompt='consent',
-                include_granted_scopes='true',
-                state=user_email  # เก็บ email ใน state เพื่อใช้อ้างอิงตอน callback
-            )
-            
-            # ส่งกลับ URL และสถานะที่ต้องการการยืนยันตัวตน
-            return {
-                "requires_auth": True,
-                "auth_url": auth_url,
-                "redirect_uri": flow.redirect_uri
-            }
-        
-        # บันทึก token ใหม่
-        with open(token_path, 'w') as token_file:
-            token_file.write(creds.to_json())
+            print("❌ Token ใช้ไม่ได้ และไม่มี refresh_token เลย")
+            return _get_auth_redirect(user_email)
             
     return creds
+
+def _get_auth_redirect(user_email: str):
+    flow = InstalledAppFlow.from_client_secrets_file(CLIENT_SECRET_FILE, SCOPES)
+    flow.redirect_uri = f"{base_url}/oauth2callback"
+    auth_url, _ = flow.authorization_url(
+        access_type='offline',
+        prompt='consent',
+        include_granted_scopes='true',
+        state=user_email
+    )
+    return {
+        "requires_auth": True,
+        "auth_url": auth_url,
+        "redirect_uri": flow.redirect_uri
+    }
 
 def get_calendar_events(user_email: str, calendar_id: str, start_date: str, end_date: str):
     """ดึงข้อมูลกิจกรรมจาก Google Calendar"""
     try:
         # รับ credentials
-        creds = get_credentials(user_email)
-        
+        creds = refresh_token_safe(user_email)
+        if not creds:
+            if not creds:
+                return {
+                    "email": user_email,
+                    "calendar_id": calendar_id,
+                    "events": [],
+                    "auth_status": "expired"
+                }
         # สร้าง service สำหรับเรียกใช้ Calendar API
         service = build('calendar', 'v3', credentials=creds)
         
@@ -328,4 +353,63 @@ def get_day_suffix(day):
         return 'rd'
     else:
         return 'th'
+
+def refresh_token_safe(user_email: str):
+    token_entry = get_token(user_email)
+    if not token_entry:
+        print(f"❌ ไม่พบ token ในระบบสำหรับ {user_email}")
+        return None
+
+    creds = Credentials(
+        token=token_entry.access_token,
+        refresh_token=token_entry.refresh_token,
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id=CLIENT_ID,
+        client_secret=CLIENT_SECRET,
+        scopes=SCOPES
+    )
+
+    # ตรวจสอบว่า expiry มีค่าหรือไม่ก่อนเปรียบเทียบ
+    need_refresh = False
+    if not creds.expiry:
+        need_refresh = True
+        print(f"⚠️ Token ของ {user_email} ไม่มีค่า expiry → ต้องรีเฟรช")
+    elif creds.expired:
+        need_refresh = True
+        print(f"⚠️ Token ของ {user_email} หมดอายุแล้ว → ต้องรีเฟรช")
+    elif (creds.expiry - datetime.utcnow()).total_seconds() < 300:
+        need_refresh = True
+        seconds_left = (creds.expiry - datetime.utcnow()).total_seconds()
+        print(f"⚠️ Token ของ {user_email} จะหมดใน {int(seconds_left)} วินาที → ต้องรีเฟรช")
+    
+    if need_refresh:
+        try:
+            creds.refresh(GoogleRequest())
+            update_token(
+                email=user_email,
+                access_token=creds.token,
+                refresh_token=creds.refresh_token,
+                expiry=creds.expiry
+            )
+            print(f"✅ รีเฟรช token สำเร็จสำหรับ {user_email}")
+        except Exception as e:
+            print(f"❌ รีเฟรชล้มเหลว: {str(e)}")
+            return None
+    else:
+        print(f"✅ Token ของ {user_email} ยังใช้ได้")
+
+    return creds
+
+
+
+
+
+
+
+
+
+
+
+
+
 
