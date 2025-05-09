@@ -1296,7 +1296,6 @@ def get_available_dates(request: ManagerRecruiter2):
     print(f"[LOG] Matching available slots done in {timeTest.time() - t5:.3f}s")
     # สร้างปุ่ม quick reply สำหรับวันที่ที่มีคู่ว่าง
     items = []
-    print(f"[LOG] Found {len(available_dates)} available dates")
     for date_str in available_dates:
         try:
             date_obj = datetime.fromisoformat(date_str)
@@ -1348,7 +1347,10 @@ def get_available_timeslots(request: DateRequest):
     ดึงข้อมูลช่วงเวลาที่ว่างในวันที่ระบุ
     แสดงเฉพาะช่วงเวลาว่างในระหว่าง 09:00 - 18:00 โดยแบ่งเป็นช่วงละ 30 นาที
     """
+    start = timeTest.time()
+    print(f"[START] API started at {start:.6f}")
     # ใช้ฟังก์ชัน get_people เพื่อรับรายชื่ออีเมลผู้ใช้แยกตามประเภท M และ R
+    t1 = timeTest.time()
     users_dict = get_people(
         file_path=str(FILE_PATH),
         location=request.location,
@@ -1356,7 +1358,7 @@ def get_available_timeslots(request: DateRequest):
         exp_kind=request.exp_kind,
         age_key=request.age_key
     )
-    
+    print(f"[LOG] get_people done in {timeTest.time() - t1:.3f}s")
     # กำหนดวันที่จะตรวจสอบ
     date = datetime.fromisoformat(request.date).date()
     start_datetime = datetime.combine(date, time(0, 0, 0)).astimezone(timezone.utc)
@@ -1366,6 +1368,7 @@ def get_available_timeslots(request: DateRequest):
     time_max = end_datetime.strftime("%Y-%m-%dT%H:%M:%SZ")
     
     # ดึงข้อมูลกิจกรรมสำหรับ Manager และ Recruiter
+    t2 = timeTest.time()
     managers_events = {}
     for user_info in users_dict['M']:
         email = user_info["Email"]
@@ -1405,7 +1408,9 @@ def get_available_timeslots(request: DateRequest):
                 print(f"เกิดข้อผิดพลาดในการดึงข้อมูลสำหรับ M: {email}: {str(e)}")
         else:
             print(f"ผู้ใช้ {email} ยังไม่ได้ยืนยันตัวตน")
+    print(f"[LOG] get_managers_events done in {timeTest.time() - t2:.3f}s")
     
+    t3 = timeTest.time()
     recruiters_events = {}
     for user_info in users_dict['R']:
         email = user_info["Email"]
@@ -1445,11 +1450,12 @@ def get_available_timeslots(request: DateRequest):
                 print(f"เกิดข้อผิดพลาดในการดึงข้อมูลสำหรับ R: {email}: {str(e)}")
         else:
             print(f"ผู้ใช้ {email} ยังไม่ได้ยืนยันตัวตน")
-    
+    print(f"[LOG] get_recruiters_events done in {timeTest.time() - t3:.3f}s")
     # เก็บช่วงเวลาว่างและนับจำนวนคู่ที่ว่าง
     available_timeslots = []
     
     # สร้างช่วงเวลาทุกๆ 30 นาที
+    t4 = timeTest.time()
     for hour in range(9, 18):
         for minute in [0, 30]:
             slot_start = datetime.combine(date, time(hour, minute)).astimezone(timezone.utc)
@@ -1490,7 +1496,7 @@ def get_available_timeslots(request: DateRequest):
                     "available_pairs_count": available_pairs_count,
                     "available_pairs": available_pairs
                 })
-                
+    print(f"[LOG] find_available_time_slots done in {timeTest.time() - t4:.3f}s")            
     print("อ่ะ ตรงนี้ๆๆ")
     print(available_timeslots)    
    # แปลงข้อมูลเพื่อสร้างข้อความและปุ่มสำหรับ LINE
@@ -1544,7 +1550,7 @@ def get_available_timeslots(request: DateRequest):
         "date": request.date,
         "available_timeslots": available_timeslots
     }
-    
+    print(f"[LOG] API done at {timeTest.time() - start:.3f}s")
     return JSONResponse(
         content=response,
         headers={"Response-Type": "object"}
@@ -1558,7 +1564,10 @@ def get_available_pairs(request: TimeSlotRequest):
     ดึงข้อมูลคู่ที่ว่างในช่วงเวลาที่ระบุ
     แสดงรายละเอียดของ manager และ recruiter ที่ว่างในช่วงเวลานั้น
     """
+    start = timeTest.time()
+    print(f"[START] API started at {start:.6f}")
     # ใช้ฟังก์ชัน get_people เพื่อรับรายชื่ออีเมลผู้ใช้แยกตามประเภท M และ R
+    t1 = timeTest.time()
     users_dict = get_people(
         file_path=str(FILE_PATH),
         location=request.location,
@@ -1566,7 +1575,7 @@ def get_available_pairs(request: TimeSlotRequest):
         exp_kind=request.exp_kind,
         age_key=request.age_key
     )
-    
+    print(f"[LOG] get_people done in {timeTest.time() - t1:.3f}s")
     # แยกเวลาเริ่มต้นและสิ้นสุดจาก time_slot
     time_parts = request.time_slot.split("-")
     start_time_str = time_parts[0]
@@ -1586,7 +1595,7 @@ def get_available_pairs(request: TimeSlotRequest):
     
     time_min = start_datetime.strftime("%Y-%m-%dT%H:%M:%SZ")
     time_max = end_datetime.strftime("%Y-%m-%dT%H:%M:%SZ")
-    
+    t2 = timeTest.time()
     # ดึงข้อมูลกิจกรรมสำหรับ Manager และ Recruiter
     managers_events = {}
     for user_info in users_dict['M']:
@@ -1627,7 +1636,8 @@ def get_available_pairs(request: TimeSlotRequest):
                 print(f"เกิดข้อผิดพลาดในการดึงข้อมูลสำหรับ M: {email}: {str(e)}")
         else:
             print(f"ผู้ใช้ {email} ยังไม่ได้ยืนยันตัวตน")
-    
+    print(f"[LOG] get_managers_events done in {timeTest.time() - t2:.3f}s")
+    t3 = timeTest.time()
     recruiters_events = {}
     for user_info in users_dict['R']:
         email = user_info["Email"]
@@ -1667,10 +1677,10 @@ def get_available_pairs(request: TimeSlotRequest):
                 print(f"เกิดข้อผิดพลาดในการดึงข้อมูลสำหรับ R: {email}: {str(e)}")
         else:
             print(f"ผู้ใช้ {email} ยังไม่ได้ยืนยันตัวตน")
-    
+    print(f"[LOG] get_recruiters_events done in {timeTest.time() - t3:.3f}s")
     # เก็บคู่ที่ว่างในช่วงเวลาที่ระบุ
     available_pairs = []
-    
+    t4 = timeTest.time()
     for manager_email, manager_data in managers_events.items():
         manager_name = manager_data['name']
         manager_events = manager_data['events']
@@ -1695,7 +1705,7 @@ def get_available_pairs(request: TimeSlotRequest):
                         "name": recruiter_name
                     }
                 })
-    
+    print(f"[LOG] get_available_pairs done in {timeTest.time() - t4:.3f}s")
     # สร้างข้อความและตัวเลือกในรูปแบบ LINE Message
     message_text = f"กรุณาเลือก Manager-Recruiter ที่จะนัด\nเวลา {request.time_slot}\n"
     items = []
@@ -1741,6 +1751,7 @@ def get_available_pairs(request: TimeSlotRequest):
     }
     
     print(response)
+    print(f"[LOG] API done in {timeTest.time() - start:.3f}s")
     return JSONResponse(
         content=response,
         headers={"Response-Type": "object"}

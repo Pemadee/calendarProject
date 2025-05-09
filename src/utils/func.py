@@ -42,9 +42,10 @@ email_locks = defaultdict(threading.Lock)
 
 def is_token_valid(user_email: str) -> bool:
     """ตรวจสอบว่า token ของผู้ใช้ยังใช้งานได้หรือไม่ (เช็คจาก DB)"""
+    t1 = timeTest.time()
     token_entry = get_token(user_email)
     if not token_entry:
-        print(f"❌ ไม่พบ token ในระบบสำหรับ {user_email}")
+        print(f"❌ ไม่พบ token ในระบบสำหรับ {user_email} (ใช้เวลา {timeTest.time() - t1} s)")
         return False
 
     creds = Credentials(
@@ -57,7 +58,7 @@ def is_token_valid(user_email: str) -> bool:
     )
 
     if creds.valid:
-        print(f"✅ Token ยังใช้งานได้สำหรับ {user_email}")
+        print(f"✅ Token ยังใช้งานได้สำหรับ {user_email}(ใช้เวลา {timeTest.time() - t1} s)")
         return True
 
     if creds.expired and creds.refresh_token:
