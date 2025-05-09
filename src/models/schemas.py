@@ -50,3 +50,28 @@ class getManagerRecruiter(BaseModel):
 class combMangerRecruiter(BaseModel):
     users: List[getManagerRecruiter] #List ของ UserCalendar
    
+# Model สำหรับ API ทั้ง 3 ตัว
+class ManagerRecruiter2(BaseModel):
+    location: str
+    english_min: float
+    exp_kind: str
+    age_key: str
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    time_period: Optional[str] = None
+    include_holidays: Optional[bool] = True
+
+class DateRequest(BaseModel):
+    date: str
+    location: str
+    english_min: float
+    exp_kind: str
+    age_key: str
+
+class TimeSlotRequest(BaseModel):
+    date: str
+    time_slot: str  # Format: "HH:MM-HH:MM"
+    location: str
+    english_min: float
+    exp_kind: str
+    age_key: str

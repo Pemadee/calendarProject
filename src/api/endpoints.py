@@ -2,7 +2,8 @@
 import asyncio
 import json
 import os
-from datetime import datetime, time, timedelta, timezone
+from datetime import datetime, timedelta, timezone
+import time as timeTest
 import ssl
 import sys
 import uuid
@@ -768,6 +769,7 @@ def get_available_time_slots(request: ManagerRecruiter):
         age_key=request.age_key
     )
     
+    
     # กำหนดเวลาเริ่มต้น
     if request.start_date:
         start_datetime = datetime.fromisoformat(request.start_date).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -1015,6 +1017,598 @@ def get_available_time_slots(request: ManagerRecruiter):
     return JSONResponse(content=response)
 
 
+def create_line_payload(messages):
+    """
+    แปลงข้อความเป็นรูปแบบ LINE Payload
+    """
+    if not isinstance(messages, list):
+        messages = [messages]
+    
+    return {"line_payload": messages}
+
+@app.post("/events/available-dates")
+def get_available_dates(request: ManagerRecruiter2):
+    """
+    ดึงข้อมูลวันที่มีเวลาว่างตรงกันระหว่าง Manager และ Recruiter
+    แสดงวันที่มีคู่ว่างให้ครบ 7 วัน โดยเว้นวันเสาร์-อาทิตย์
+    """
+    start = timeTest.time()
+    print(f"[START] API started at {start:.6f}")
+    # ใช้ฟังก์ชัน get_people เพื่อรับรายชื่ออีเมลผู้ใช้แยกตามประเภท M และ R
+    t1 = timeTest.time()
+    users_dict = get_people(
+        file_path=str(FILE_PATH),
+        location=request.location,
+        english_min=request.english_min,
+        exp_kind=request.exp_kind,
+        age_key=request.age_key
+    )
+    print(f"[LOG] get_people done in {timeTest.time() - t1:.3f}s")
+    # กำหนดเวลาเริ่มต้นเป็นวันที่ปัจจุบันเสมอ
+    start_datetime = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    
+    # กำหนดช่วงเวลาในการดึงข้อมูล - ค้นหาไปข้างหน้าอีก 30 วัน เพื่อให้มีโอกาสเจอวันที่ว่างครบ 7 วัน
+    end_datetime = start_datetime + timedelta(days=20)
+    
+    time_min = start_datetime.strftime("%Y-%m-%dT%H:%M:%SZ")
+    time_max = end_datetime.strftime("%Y-%m-%dT%H:%M:%SZ")
+    
+    years_to_check = list(range(start_datetime.year, end_datetime.year + 1))
+    THAI_HOLIDAYS = holidays.Thailand(years=years_to_check)
+    
+    # สร้างรายการวันทำการที่จะตรวจสอบ (ไม่รวมวันเสาร์-อาทิตย์และวันหยุดนักขัตฤกษ์)
+    date_list = []
+    current_date = start_datetime.date()
+    t2 = timeTest.time()
+    while current_date <= end_datetime.date():
+        is_weekend = current_date.weekday() >= 5  # เสาร์=5, อาทิตย์=6
+        is_holiday = current_date in THAI_HOLIDAYS
+        
+        # กำหนดให้ include_holidays เป็น true เสมอ
+        include_holidays = True
+        
+        if not is_weekend and (include_holidays or not is_holiday):
+            date_list.append(current_date)
+        
+        current_date += timedelta(days=1)
+    print(f"[LOG] building date_list done in {timeTest.time() - t2:.3f}s")
+    # ดึงข้อมูลกิจกรรมสำหรับ Manager และ Recruiter
+    managers_events = {}
+    t3 = timeTest.time()
+    for user_info in users_dict['M']:
+        email = user_info["Email"]
+        name = user_info["Name"]
+        calendar_id = email
+        
+        if is_token_valid(email):
+            try:
+                with open(os.path.join(TOKEN_DIR, f'token_{email}.json'), 'r') as token_file:
+                    token_data = json.load(token_file)
+                creds = Credentials.from_authorized_user_info(token_data, SCOPES)
+                
+                service = build('calendar', 'v3', credentials=creds)
+                
+                events_result = service.events().list(
+                    calendarId=calendar_id,
+                    timeMin=time_min,
+                    timeMax=time_max,
+                    singleEvents=True,
+                    orderBy='startTime'
+                ).execute()
+                
+                events = events_result.get('items', [])
+                
+                # เก็บข้อมูลกิจกรรม
+                managers_events[email] = {
+                    'name': name,
+                    'events': events
+                }
+            except Exception as e:
+                print(f"เกิดข้อผิดพลาดในการดึงข้อมูลสำหรับ M: {email}: {str(e)}")
+        else:
+            print(f"ผู้ใช้ {email} ยังไม่ได้ยืนยันตัวตน")
+    print(f"[LOG] Fetched all Manager events in {timeTest.time() - t3:.3f}s")
+    
+    recruiters_events = {}
+    t4 = timeTest.time()
+    for user_info in users_dict['R']:
+        email = user_info["Email"]
+        name = user_info["Name"]
+        calendar_id = email
+        
+        if is_token_valid(email):
+            try:
+                with open(os.path.join(TOKEN_DIR, f'token_{email}.json'), 'r') as token_file:
+                    token_data = json.load(token_file)
+                
+                creds = Credentials.from_authorized_user_info(token_data, SCOPES)
+                service = build('calendar', 'v3', credentials=creds)
+                
+                events_result = service.events().list(
+                    calendarId=calendar_id,
+                    timeMin=time_min,
+                    timeMax=time_max,
+                    singleEvents=True,
+                    orderBy='startTime'
+                ).execute()
+                
+                events = events_result.get('items', [])
+                
+                # เก็บข้อมูลกิจกรรม
+                recruiters_events[email] = {
+                    'name': name,
+                    'events': events
+                }
+            except Exception as e:
+                print(f"เกิดข้อผิดพลาดในการดึงข้อมูลสำหรับ R: {email}: {str(e)}")
+        else:
+            print(f"ผู้ใช้ {email} ยังไม่ได้ยืนยันตัวตน")
+    print(f"[LOG] Fetched all Recruiter events in {timeTest.time() - t4:.3f}s")
+    # ตรวจสอบวันที่มีเวลาว่าง
+    available_dates = []
+    t5 = timeTest.time()
+    for date in date_list:
+        has_available_slot = False
+        
+        # สร้างช่วงเวลาทุกๆ 30 นาที
+        for hour in range(9, 18):
+            for minute in [0, 30]:
+                slot_start = datetime.combine(date, time(hour, minute)).astimezone(timezone.utc)
+                slot_end = (slot_start + timedelta(minutes=30)).astimezone(timezone.utc)
+                
+                # ตรวจสอบว่ามีคู่ที่ว่างหรือไม่
+                for manager_email, manager_data in managers_events.items():
+                    if has_available_slot:
+                        break
+                        
+                    manager_events = manager_data['events']
+                    
+                    for recruiter_email, recruiter_data in recruiters_events.items():
+                        recruiter_events = recruiter_data['events']
+                        
+                        # ตรวจสอบว่าทั้งคู่ว่างหรือไม่
+                        manager_is_available = is_available(manager_events, slot_start, slot_end)
+                        recruiter_is_available = is_available(recruiter_events, slot_start, slot_end)
+                        
+                        if manager_is_available and recruiter_is_available:
+                            has_available_slot = True
+                            break
+                
+                if has_available_slot:
+                    break
+        
+        if has_available_slot:
+            available_dates.append(date.strftime("%Y-%m-%d"))
+            
+            # หยุดการค้นหาเมื่อได้วันที่ว่างครบ 7 วัน
+            if len(available_dates) >= 7:
+                break
+    print(f"[LOG] Matching available slots done in {timeTest.time() - t5:.3f}s")
+    # สร้างปุ่ม quick reply สำหรับวันที่ที่มีคู่ว่าง
+    items = []
+    print(f"[LOG] Found {len(available_dates)} available dates")
+    for date_str in available_dates:
+        try:
+            date_obj = datetime.fromisoformat(date_str)
+            thai_year = date_obj.year + 543  # แปลงปี ค.ศ. เป็น พ.ศ.
+            thai_date = f"{date_obj.day}/{date_obj.month}/{thai_year}"
+            formatted_date = date_str 
+            items.append({
+                "type": "action",
+                "action": {
+                    "type": "message",
+                    "label": thai_date,
+                    "text": formatted_date
+                }
+            })
+        except ValueError:
+            pass
+    
+    # สร้างข้อความ
+    line_message = {
+        "type": "text",
+        "text": "กรุณาเลือกวันที่ต้องการนัดประชุม",
+        "quickReply": {
+            "items": items[:13]  # จำกัดที่ 13 รายการตามข้อจำกัดของ Line
+        }
+    }
+    
+    # สร้าง response ในรูปแบบของ LINE Payload
+    if not items:
+        line_message = {
+            "type": "text",
+            "text": "ไม่พบวันที่ว่างในระบบ กรุณาติดต่อผู้ดูแลระบบ"
+        }
+    
+    response = {
+        "line_payload": [line_message],
+        "available_dates": available_dates  # เก็บข้อมูลเดิมด้วย
+    }
+    print(f"[DEBUG] API done at {timeTest.time() - start:.3f}s")
+    # ส่ง response กลับพร้อม header
+    return JSONResponse(
+        content=response,
+        headers={"Response-Type": "object"}
+    )
 
 
- 
+# API 2: ดึงช่วงเวลาและคู่ในวันที่เลือก
+@app.post("/events/available-timeslots")
+def get_available_timeslots(request: DateRequest):
+    """
+    ดึงข้อมูลช่วงเวลาที่ว่างในวันที่ระบุ
+    แสดงเฉพาะช่วงเวลาว่างในระหว่าง 09:00 - 18:00 โดยแบ่งเป็นช่วงละ 30 นาที
+    """
+    # ใช้ฟังก์ชัน get_people เพื่อรับรายชื่ออีเมลผู้ใช้แยกตามประเภท M และ R
+    users_dict = get_people(
+        file_path=str(FILE_PATH),
+        location=request.location,
+        english_min=request.english_min,
+        exp_kind=request.exp_kind,
+        age_key=request.age_key
+    )
+    
+    # กำหนดวันที่จะตรวจสอบ
+    date = datetime.fromisoformat(request.date).date()
+    start_datetime = datetime.combine(date, time(0, 0, 0)).astimezone(timezone.utc)
+    end_datetime = datetime.combine(date, time(23, 59, 59)).astimezone(timezone.utc)
+    
+    time_min = start_datetime.strftime("%Y-%m-%dT%H:%M:%SZ")
+    time_max = end_datetime.strftime("%Y-%m-%dT%H:%M:%SZ")
+    
+    # ดึงข้อมูลกิจกรรมสำหรับ Manager และ Recruiter
+    managers_events = {}
+    for user_info in users_dict['M']:
+        email = user_info["Email"]
+        name = user_info["Name"]
+        calendar_id = email
+        
+        if is_token_valid(email):
+            try:
+                with open(os.path.join(TOKEN_DIR, f'token_{email}.json'), 'r') as token_file:
+                    token_data = json.load(token_file)
+                creds = Credentials.from_authorized_user_info(token_data, SCOPES)
+                
+                service = build('calendar', 'v3', credentials=creds)
+                
+                events_result = service.events().list(
+                    calendarId=calendar_id,
+                    timeMin=time_min,
+                    timeMax=time_max,
+                    singleEvents=True,
+                    orderBy='startTime'
+                ).execute()
+                
+                events = events_result.get('items', [])
+                
+                # เก็บข้อมูลกิจกรรม
+                managers_events[email] = {
+                    'name': name,
+                    'events': events
+                }
+            except Exception as e:
+                print(f"เกิดข้อผิดพลาดในการดึงข้อมูลสำหรับ M: {email}: {str(e)}")
+        else:
+            print(f"ผู้ใช้ {email} ยังไม่ได้ยืนยันตัวตน")
+    
+    recruiters_events = {}
+    for user_info in users_dict['R']:
+        email = user_info["Email"]
+        name = user_info["Name"]
+        calendar_id = email
+        
+        if is_token_valid(email):
+            try:
+                with open(os.path.join(TOKEN_DIR, f'token_{email}.json'), 'r') as token_file:
+                    token_data = json.load(token_file)
+                
+                creds = Credentials.from_authorized_user_info(token_data, SCOPES)
+                service = build('calendar', 'v3', credentials=creds)
+                
+                events_result = service.events().list(
+                    calendarId=calendar_id,
+                    timeMin=time_min,
+                    timeMax=time_max,
+                    singleEvents=True,
+                    orderBy='startTime'
+                ).execute()
+                
+                events = events_result.get('items', [])
+                
+                # เก็บข้อมูลกิจกรรม
+                recruiters_events[email] = {
+                    'name': name,
+                    'events': events
+                }
+            except Exception as e:
+                print(f"เกิดข้อผิดพลาดในการดึงข้อมูลสำหรับ R: {email}: {str(e)}")
+        else:
+            print(f"ผู้ใช้ {email} ยังไม่ได้ยืนยันตัวตน")
+    
+    # เก็บช่วงเวลาว่างและนับจำนวนคู่ที่ว่าง
+    available_timeslots = []
+    
+    # สร้างช่วงเวลาทุกๆ 30 นาที
+    for hour in range(9, 18):
+        for minute in [0, 30]:
+            slot_start = datetime.combine(date, time(hour, minute)).astimezone(timezone.utc)
+            slot_end = (slot_start + timedelta(minutes=30)).astimezone(timezone.utc)
+            
+            # แปลงเป็นเวลาท้องถิ่นเพื่อแสดงผล
+            local_start = slot_start.astimezone().strftime("%H:%M")
+            local_end = slot_end.astimezone().strftime("%H:%M")
+            time_slot_key = f"{local_start}-{local_end}"
+            
+            # ตรวจสอบคู่ที่ว่าง
+            available_pairs_count = 0
+            available_pairs = []
+            
+            for manager_email, manager_data in managers_events.items():
+                manager_events = manager_data['events']
+                manager_name = manager_data['name']
+                
+                for recruiter_email, recruiter_data in recruiters_events.items():
+                    recruiter_events = recruiter_data['events']
+                    recruiter_name = recruiter_data['name']
+                    
+                    # ตรวจสอบว่าทั้งคู่ว่างหรือไม่
+                    manager_is_available = is_available(manager_events, slot_start, slot_end)
+                    recruiter_is_available = is_available(recruiter_events, slot_start, slot_end)
+                    
+                    if manager_is_available and recruiter_is_available:
+                        available_pairs_count += 1
+                        # เพิ่มข้อมูลคู่ที่ว่าง
+                        available_pairs.append({
+                            "pair": f"{manager_name}-{recruiter_name}"
+                        })
+            
+            # เก็บข้อมูลช่วงเวลาที่มีคู่ว่างอย่างน้อย 1 คู่
+            if available_pairs_count > 0:
+                available_timeslots.append({
+                    "time_slot": time_slot_key,
+                    "available_pairs_count": available_pairs_count,
+                    "available_pairs": available_pairs
+                })
+                
+    print("อ่ะ ตรงนี้ๆๆ")
+    print(available_timeslots)    
+   # แปลงข้อมูลเพื่อสร้างข้อความและปุ่มสำหรับ LINE
+    slot_texts = []
+    items = []
+    
+    # สร้างรูปแบบวันที่แบบไทย
+    date_obj = datetime.fromisoformat(request.date)
+    thai_year = date_obj.year + 543
+    selected_date = f"{date_obj.day}/{date_obj.month}/{thai_year}"
+
+    for i, slot in enumerate(available_timeslots[:12], start=1):
+        time_slot = slot["time_slot"]
+        pairs_text = "\n   " + "\n   ".join([f"👥{pair['pair']}" for pair in slot["available_pairs"]])
+        slot_text = f"{i}. เวลา {time_slot}{pairs_text}"
+        slot_texts.append(slot_text)
+        
+        # สร้างปุ่ม quick reply
+        items.append({
+            "type": "action",
+            "action": {
+                "type": "message",
+                "label": f"({i})",
+                "text": time_slot
+            }
+        })
+    
+    # เพิ่มปุ่ม 'ย้อนกลับ'
+    items.append({
+        "type": "action",
+        "action": {
+            "type": "message",
+            "label": "ย้อนกลับ",
+            "text": "ย้อนกลับ"
+        }
+    })
+    
+    # สร้างข้อความ
+    message_text = f"กรุณาเลือกช่วงเวลาที่ต้องการ:\nวันที่ : {selected_date}\n" + "\n".join(slot_texts)
+    
+    line_message = {
+        "type": "text",
+        "text": message_text,
+        "quickReply": {
+            "items": items
+        }
+    }
+    
+    response = {
+        "line_payload": [line_message],
+        "date": request.date,
+        "available_timeslots": available_timeslots
+    }
+    
+    return JSONResponse(
+        content=response,
+        headers={"Response-Type": "object"}
+    )
+
+
+# API 3: ดึงรายละเอียดของคู่ที่ว่างในช่วงเวลาที่เลือก
+@app.post("/events/available-pairs")
+def get_available_pairs(request: TimeSlotRequest):
+    """
+    ดึงข้อมูลคู่ที่ว่างในช่วงเวลาที่ระบุ
+    แสดงรายละเอียดของ manager และ recruiter ที่ว่างในช่วงเวลานั้น
+    """
+    # ใช้ฟังก์ชัน get_people เพื่อรับรายชื่ออีเมลผู้ใช้แยกตามประเภท M และ R
+    users_dict = get_people(
+        file_path=str(FILE_PATH),
+        location=request.location,
+        english_min=request.english_min,
+        exp_kind=request.exp_kind,
+        age_key=request.age_key
+    )
+    
+    # แยกเวลาเริ่มต้นและสิ้นสุดจาก time_slot
+    time_parts = request.time_slot.split("-")
+    start_time_str = time_parts[0]
+    end_time_str = time_parts[1]
+    
+    # สร้าง datetime object
+    date = datetime.fromisoformat(request.date).date()
+    start_hour, start_minute = map(int, start_time_str.split(":"))
+    end_hour, end_minute = map(int, end_time_str.split(":"))
+    
+    slot_start = datetime.combine(date, time(start_hour, start_minute)).astimezone(timezone.utc)
+    slot_end = datetime.combine(date, time(end_hour, end_minute)).astimezone(timezone.utc)
+    
+    # สร้างช่วงวันสำหรับดึงข้อมูลปฏิทิน (เพื่อดึงข้อมูลทั้งวัน)
+    start_datetime = datetime.combine(date, time(0, 0, 0)).astimezone(timezone.utc)
+    end_datetime = datetime.combine(date, time(23, 59, 59)).astimezone(timezone.utc)
+    
+    time_min = start_datetime.strftime("%Y-%m-%dT%H:%M:%SZ")
+    time_max = end_datetime.strftime("%Y-%m-%dT%H:%M:%SZ")
+    
+    # ดึงข้อมูลกิจกรรมสำหรับ Manager และ Recruiter
+    managers_events = {}
+    for user_info in users_dict['M']:
+        email = user_info["Email"]
+        name = user_info["Name"]
+        calendar_id = email
+        
+        if is_token_valid(email):
+            try:
+                with open(os.path.join(TOKEN_DIR, f'token_{email}.json'), 'r') as token_file:
+                    token_data = json.load(token_file)
+                creds = Credentials.from_authorized_user_info(token_data, SCOPES)
+                
+                service = build('calendar', 'v3', credentials=creds)
+                
+                events_result = service.events().list(
+                    calendarId=calendar_id,
+                    timeMin=time_min,
+                    timeMax=time_max,
+                    singleEvents=True,
+                    orderBy='startTime'
+                ).execute()
+                
+                events = events_result.get('items', [])
+                
+                # เก็บข้อมูลกิจกรรม
+                managers_events[email] = {
+                    'name': name,
+                    'events': events
+                }
+            except Exception as e:
+                print(f"เกิดข้อผิดพลาดในการดึงข้อมูลสำหรับ M: {email}: {str(e)}")
+        else:
+            print(f"ผู้ใช้ {email} ยังไม่ได้ยืนยันตัวตน")
+    
+    recruiters_events = {}
+    for user_info in users_dict['R']:
+        email = user_info["Email"]
+        name = user_info["Name"]
+        calendar_id = email
+        
+        if is_token_valid(email):
+            try:
+                with open(os.path.join(TOKEN_DIR, f'token_{email}.json'), 'r') as token_file:
+                    token_data = json.load(token_file)
+                
+                creds = Credentials.from_authorized_user_info(token_data, SCOPES)
+                service = build('calendar', 'v3', credentials=creds)
+                
+                events_result = service.events().list(
+                    calendarId=calendar_id,
+                    timeMin=time_min,
+                    timeMax=time_max,
+                    singleEvents=True,
+                    orderBy='startTime'
+                ).execute()
+                
+                events = events_result.get('items', [])
+                
+                # เก็บข้อมูลกิจกรรม
+                recruiters_events[email] = {
+                    'name': name,
+                    'events': events
+                }
+            except Exception as e:
+                print(f"เกิดข้อผิดพลาดในการดึงข้อมูลสำหรับ R: {email}: {str(e)}")
+        else:
+            print(f"ผู้ใช้ {email} ยังไม่ได้ยืนยันตัวตน")
+    
+    # เก็บคู่ที่ว่างในช่วงเวลาที่ระบุ
+    available_pairs = []
+    
+    for manager_email, manager_data in managers_events.items():
+        manager_name = manager_data['name']
+        manager_events = manager_data['events']
+        
+        for recruiter_email, recruiter_data in recruiters_events.items():
+            recruiter_name = recruiter_data['name']
+            recruiter_events = recruiter_data['events']
+            
+            # ตรวจสอบว่าทั้งคู่ว่างหรือไม่
+            manager_is_available = is_available(manager_events, slot_start, slot_end)
+            recruiter_is_available = is_available(recruiter_events, slot_start, slot_end)
+            
+            if manager_is_available and recruiter_is_available:
+                available_pairs.append({
+                    "pair": f"{manager_name}-{recruiter_name}",
+                    "manager": {
+                        "email": manager_email,
+                        "name": manager_name
+                    },
+                    "recruiter": {
+                        "email": recruiter_email,
+                        "name": recruiter_name
+                    }
+                })
+    
+    # สร้างข้อความและตัวเลือกในรูปแบบ LINE Message
+    message_text = f"กรุณาเลือก Manager-Recruiter ที่จะนัด\nเวลา {request.time_slot}\n"
+    items = []
+    
+    for i, pair_detail in enumerate(available_pairs, start=1):
+        message_text += f"   {i}.👥 {pair_detail['pair']}\n"
+        
+        # สร้างปุ่ม quick reply (สูงสุด 12 รายการเพื่อเหลือที่สำหรับปุ่มย้อนกลับ)
+        if i < 13:
+            items.append({
+                "type": "action",
+                "action": {
+                    "type": "message",
+                    "label": f"({i})",
+                    "text": f"({i})"
+                }
+            })
+    
+    # เพิ่มปุ่มย้อนกลับ
+    items.append({
+        "type": "action",
+        "action": {
+            "type": "message",
+            "label": "ย้อนกลับ",
+            "text": "ย้อนกลับ"
+        }
+    })
+    
+    line_message = {
+        "type": "text",
+        "text": message_text,
+        "quickReply": {
+            "items": items
+        }
+    }
+    
+   # สร้าง response ในรูปแบบของ LINE Payload
+    response = {
+        "line_payload": [line_message],
+        "date": request.date,
+        "time_slot": request.time_slot,
+        "available_pairs": available_pairs
+    }
+    
+    print(response)
+    return JSONResponse(
+        content=response,
+        headers={"Response-Type": "object"}
+    )

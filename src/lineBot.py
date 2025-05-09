@@ -159,6 +159,64 @@ def handle_message(event):
                 session["state"] = "initial"
                 send_menu_only(user_id)
 
+        def background_login_and_push(user_id, user_email):
+                        """ดึง events ใน background แล้ว push กลับหาผู้ใช้"""
+                        try:
+                            resp = requests.get(
+                                f"{base_url}/events/{user_email}",
+                                allow_redirects=False,
+                                timeout=30                # ยืด timeout ให้เยอะขึ้น
+                            )
+
+                            # ===== Auth required =====
+                            if resp.status_code in (302, 307) and "location" in resp.headers:
+                                auth_url = resp.headers["location"]
+                                line_bot_api.push_message(
+                                    user_id,
+                                    TextSendMessage(text=f"กรุณาคลิกยืนยันสิทธิ์ที่ลิงก์นี้\n{auth_url}")
+                                )
+                                return
+                            # ===== Got events =====
+                            if resp.status_code == 200:
+                                data = resp.json()
+                                events = data.get("events", [])
+                                if events:
+                                    lines = [f"📅 ปฏิทินของ {user_email} (7 วันถัดไป)"]
+                                    for ev in events[:10]:
+                                        lines.append(f"• {ev['start']} ▶ {ev['summary']}")
+                                    reply_text = "\n".join(lines)
+                                    
+                                else:
+                                    reply_text = f"ไม่พบกิจกรรม 7 วันถัดไปของ {user_email}"
+                                    # reset session
+                                    session.clear()
+                                    session["state"] = "initial"
+                                    send_menu_only(user_id)
+                                line_bot_api.push_message(user_id, TextSendMessage(text=f"✅ Login สำเร็จ\n\n{reply_text}"))
+                                # reset session
+                                session.clear()
+                                session["state"] = "initial"
+                                send_menu_only(user_id)
+                            else:
+                                line_bot_api.push_message(
+                                    user_id,
+                                    TextSendMessage(text=f"เกิดข้อผิดพลาด (status {resp.status_code}) กรุณาลองใหม่ภายหลัง")
+                                )
+                                                # reset session
+                                session.clear()
+                                session["state"] = "initial"
+                                send_menu_only(user_id)
+
+                        except Exception as e:
+                            print("❌ login error:", e)
+                            line_bot_api.push_message(
+                                user_id,
+                                TextSendMessage(text=f"เกิดข้อผิดพลาดในการดึงปฏิทิน: {e}")
+                            )
+                            session.clear()
+                            session["state"] = "initial"
+                            send_menu_only(user_id)
+
         email_pattern = r"^[\w\.-]+@[\w\.-]+\.\w{2,}$"
         if re.match(email_pattern, text):
             user_email = text.strip()
@@ -191,65 +249,7 @@ def handle_message(event):
             session.clear()
             session["state"] = "initial"
             send_menu_only(user_id)
-            
-            def background_login_and_push(user_id, user_email):
-                """ดึง events ใน background แล้ว push กลับหาผู้ใช้"""
-                try:
-                    resp = requests.get(
-                        f"{base_url}/events/{user_email}",
-                        allow_redirects=False,
-                        timeout=30                # ยืด timeout ให้เยอะขึ้น
-                    )
-
-                    # ===== Auth required =====
-                    if resp.status_code in (302, 307) and "location" in resp.headers:
-                        auth_url = resp.headers["location"]
-                        line_bot_api.push_message(
-                            user_id,
-                            TextSendMessage(text=f"กรุณาคลิกยืนยันสิทธิ์ที่ลิงก์นี้\n{auth_url}")
-                        )
-                        return
-                    # ===== Got events =====
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        events = data.get("events", [])
-                        if events:
-                            lines = [f"📅 ปฏิทินของ {user_email} (7 วันถัดไป)"]
-                            for ev in events[:10]:
-                                lines.append(f"• {ev['start']} ▶ {ev['summary']}")
-                            reply_text = "\n".join(lines)
-                            
-                        else:
-                            reply_text = f"ไม่พบกิจกรรม 7 วันถัดไปของ {user_email}"
-                            # reset session
-                            session.clear()
-                            session["state"] = "initial"
-                            send_menu_only(user_id)
-                        line_bot_api.push_message(user_id, TextSendMessage(text=f"✅ Login สำเร็จ\n\n{reply_text}"))
-                        # reset session
-                        session.clear()
-                        session["state"] = "initial"
-                        send_menu_only(user_id)
-                    else:
-                        line_bot_api.push_message(
-                            user_id,
-                            TextSendMessage(text=f"เกิดข้อผิดพลาด (status {resp.status_code}) กรุณาลองใหม่ภายหลัง")
-                        )
-                                        # reset session
-                        session.clear()
-                        session["state"] = "initial"
-                        send_menu_only(user_id)
-
-                except Exception as e:
-                    print("❌ login error:", e)
-                    line_bot_api.push_message(
-                        user_id,
-                        TextSendMessage(text=f"เกิดข้อผิดพลาดในการดึงปฏิทิน: {e}")
-                    )
-                    session.clear()
-                    session["state"] = "initial"
-                    send_menu_only(user_id)
-                        
+                         
             email_pattern = r"^[\w\.-]+@[\w\.-]+\.\w{2,}$"
             if re.match(email_pattern, text):
                 user_email = text.strip()
@@ -442,7 +442,8 @@ def handle_message(event):
                     quick_reply=quick_reply
                 )
             )
-    
+            
+    # ================= MEETING FLOW =================
     # Profile confirmation
     elif session["state"] == "profile_confirm":
         if text == "ยืนยัน":
@@ -459,63 +460,13 @@ def handle_message(event):
                 event.reply_token,
                 TextSendMessage(text="กำลังค้นหาวันเวลาว่าง โปรดรอสักครู่..."))
            
-            def background_post_and_push(user_id, session_data):
-                
-                try:
-                    profile_json = {
-                        "location": session_data.get("location"),
-                        "english_min": 5 if session_data.get("eng_level") == "ระดับ 5" else 4,
-                        "exp_kind": "strong" if session_data.get("exp") == "Strong exp" else "non",
-                        "age_key": str(session_data.get("age")),
-                        "start_date": datetime.now().strftime("%Y-%m-%d"),
-                        "time_period": "7"
-                    }
-                    # print("🚀 Background Started with data:", profile_json)
-
-                    response = requests.post(
-                        f"{base_url}/events/availableMR",
-                        json=profile_json,
-                        timeout=30
-                    )
-                    response.raise_for_status()
-                    # print("✅ POST สำเร็จ:", response.json())
-                    
-
-                    if response.status_code == 200:
-                        session["state"] = "select_date"
-                        # เก็บข้อมูลที่ได้รับจาก API ลงใน session
-                        user_sessions[user_id]["state"] = "select_date"  # ต้องแก้ไขเป็น user_sessions[user_id] แทน session
-                        user_sessions[user_id]["available_time_slots"] = response.json().get("available_time_slots", [])
-                        print(user_sessions[user_id]["available_time_slots"])
-                        # แสดงข้อความยืนยันการบันทึกข้อมูล
-                        line_bot_api.push_message(
-                            user_id,
-                            TextSendMessage(text="บันทึกข้อมูลเรียบร้อยแล้ว ต่อไปเป็นการนัดประชุม")
-                        )
-                        
-                        # ส่งหน้าเลือกวันที่ให้ผู้ใช้
-                        send_date_selection(user_id, session["available_time_slots"])
-                    else:
-                        line_bot_api.push_message(
-                            user_id,
-                            TextSendMessage(text="❗ เกิดข้อผิดพลาด กรุณาลองใหม่ภายหลัง")
-                        )
-                    
-                    print("✅ ส่งข้อมูล Manager ไปยัง API แล้ว:", response.status_code)
-                except Exception as e:
-                    print("❌ ส่งข้อมูลล้มเหลว:", e)
-                    line_bot_api.reply_message(
-                        event.reply_token,
-                        TextSendMessage(text="เกิดข้อผิดพลาดในการเชื่อมต่อกับระบบ กรุณาลองใหม่ภายหลัง")
-                    )
             scheduler.add_job(
                 func=background_post_and_push,
                 args=[user_id, session.copy()],
                 trigger="date",
                 run_date=datetime.now() + timedelta(seconds=2)
             )
-        
-              
+                    
         elif text == "ยกเลิก":
             # Reset session and go back to initial state
             session.clear()
@@ -538,120 +489,409 @@ def handle_message(event):
                 )
             )
     
-    # ================= MEETING SCHEDULING FLOW =================
-# ในฟังก์ชัน handle_message, ส่วนของ select_date (ประมาณบรรทัดที่ 389)
+    # ในส่วนของ select_date
     elif session["state"] == "select_date":
-        # ตรวจสอบรูปแบบวันที่ที่ผู้ใช้เลือก (เช่น "27/4/2568")
-        selected_date = None
-        available_dates = []
+        # ตรวจสอบรูปแบบวันที่ที่ผู้ใช้เลือก (เช่น "8/5/2568")
+        selected_date_iso = None
+        available_dates = []  # สร้างรายการวันที่ให้เลือก
         
         # จัดรูปแบบวันที่ให้แสดงเป็นรูปแบบไทย (วว/ดด/25XX)
         for time_slot_data in session.get("available_time_slots", []):
             date_str = time_slot_data.get("date", "")
             if date_str:
-                # แปลงรูปแบบวันที่จาก "2025-04-27" เป็น "27/4/2568"
+                # แปลงรูปแบบวันที่จาก "2025-05-08" เป็น "8/5/2568"
                 try:
                     date_obj = datetime.strptime(date_str, "%Y-%m-%d")
                     thai_year = date_obj.year + 543  # แปลงปี ค.ศ. เป็น พ.ศ.
                     thai_date = f"{date_obj.day}/{date_obj.month}/{thai_year}"
-                    available_dates.append(thai_date)
+                    available_dates.append(thai_date)  # เพิ่มวันที่ในรูปแบบไทยเข้าไปในรายการ
                     
                     # ตรวจสอบว่าผู้ใช้เลือกวันที่นี้หรือไม่
                     if text == thai_date:
-                        selected_date = time_slot_data
-                        session["selected_date_iso"] = date_str
-                        session["selected_date"] = thai_date
+                        selected_date_iso = date_str
+                        selected_date_thai = thai_date
+                        break
                 except ValueError:
                     pass
         
-        if selected_date:
+        if selected_date_iso:
             # พิมพ์ข้อความเพื่อดีบัก
-            print(f"✅ เลือกวันที่: {session['selected_date']}")
+            print(f"✅ เลือกวันที่: {selected_date_thai}")
             
             session["state"] = "select_time_slot"  # ตั้งค่าสถานะก่อนพิมพ์ข้อความ
+            session["selected_date_iso"] = selected_date_iso
+            session["selected_date"] = selected_date_thai
             
             line_bot_api.reply_message(
                 event.reply_token,
-                TextSendMessage(text=f"คุณเลือกวันที่ {session['selected_date']} กำลังค้นหาช่วงเวลาที่ว่าง...")
+                TextSendMessage(text=f"คุณเลือกวันที่ {selected_date_thai} กำลังค้นหาช่วงเวลาที่ว่าง...")
             )
             
-            # นำข้อมูลช่วงเวลาที่ว่างในวันที่เลือกมาแสดง
-            time_slots = selected_date.get("time_slots", [])
-            session["time_slots"] = time_slots
-            
-            # ส่งข้อความเลือก time slots ด้วย push message หลังจาก reply message
-            def send_time_slots_later():
-                send_time_slots(user_id, time_slots, session["selected_date"])
-                
+            # เรียก API เพื่อดึงข้อมูลช่วงเวลาที่ว่าง
+            def get_available_timeslots_later():
+                try:
+                    # สร้าง payload สำหรับ API
+                    date_request = {
+                        "date": selected_date_iso,
+                        "location": session.get("location", ""),
+                        "english_min": 5 if session.get("eng_level") == "ระดับ 5" else 4,
+                        "exp_kind": "strong" if session.get("exp") == "Strong exp" else "non",
+                        "age_key": str(session.get("age", ""))
+                    }
+                    
+                    print(f"🚀 เรียก API ช่วงเวลาว่าง: {date_request}")
+                    
+                    # เรียก API
+                    response = requests.post(
+                        f"{base_url}/events/available-timeslots",
+                        json=date_request,
+                        timeout=30
+                    )
+                    
+                    print(f"📡 API Response (status): {response.status_code}")
+                    
+                    if response.status_code == 200:
+                        api_response = response.json()
+                        print(f"📦 API Response (available_timeslots): {api_response}")
+                        
+                        # เก็บข้อมูลช่วงเวลาที่ว่างลงใน session - ปรับให้เข้ากับข้อมูลเดิม
+                        if "available_timeslots" in api_response:
+                            time_slots = []
+                            for slot in api_response["available_timeslots"]:
+                                # แปลงข้อมูลให้เข้ากับรูปแบบเดิม
+                                pairs = []
+                                pair_details = []
+                                
+                                # สร้าง pair และ pair_details จาก available_pairs
+                                for pair_info in slot.get("available_pairs", []):
+                                    pair_name = pair_info.get("pair", "")
+                                    pairs.append(pair_name)
+                                    pair_details.append(pair_info)
+                                
+                                time_slots.append({
+                                    "time": slot.get("time_slot", ""),
+                                    "available_pairs": pairs,
+                                    "pair_details": pair_details
+                                })
+                                
+                            session["time_slots"] = time_slots
+                        
+                        # ส่ง line_payload จาก API โดยตรง
+                        line_payload = api_response.get("line_payload", [])
+                        if line_payload:
+                            send_line_payload(user_id, line_payload)
+                        else:
+                            # กรณีไม่พบข้อมูลช่วงเวลา
+                            line_bot_api.push_message(
+                                user_id,
+                                TextSendMessage(text="❗ ไม่พบช่วงเวลาว่างในวันที่เลือก กรุณาเลือกวันที่อื่น")
+                            )
+                            # กลับไปยังหน้าเลือกวันที่
+                            session["state"] = "select_date"
+                            if "selected_date" in session:
+                                del session["selected_date"]
+                            if "selected_date_iso" in session:
+                                del session["selected_date_iso"]
+                    else:
+                        line_bot_api.push_message(
+                            user_id,
+                            TextSendMessage(text=f"❗ เกิดข้อผิดพลาดในการค้นหาช่วงเวลา ({response.status_code}) กรุณาลองใหม่ภายหลัง")
+                        )
+                except Exception as e:
+                    print(f"❌ เกิดข้อผิดพลาดในการดึงช่วงเวลา: {e}")
+                    line_bot_api.push_message(
+                        user_id,
+                        TextSendMessage(text=f"เกิดข้อผิดพลาดในการเชื่อมต่อกับระบบ: {str(e)} กรุณาลองใหม่ภายหลัง")
+                    )
+            # ตั้งเวลาเรียกฟังก์ชันหลังจากส่งข้อความยืนยัน
             scheduler.add_job(
-                func=send_time_slots_later,
+                func=get_available_timeslots_later,
                 trigger="date",
                 run_date=datetime.now() + timedelta(seconds=1)
             )
         else:
             # ถ้าผู้ใช้ไม่ได้เลือกวันที่จากรายการ ให้แสดงรายการอีกครั้ง
-            items = [
-                QuickReplyButton(action=MessageAction(label=date, text=date))
-                for date in available_dates[:13]  # จำกัดที่ 13 รายการตามข้อจำกัดของ Line
-            ]
-            
-            quick_reply = QuickReply(items=items)
-            
-            line_bot_api.reply_message(
-                event.reply_token,
-                TextSendMessage(
-                    text="กรุณาเลือกวันที่ต้องการนัดประชุมจากตัวเลือกที่กำหนดให้",
-                    quick_reply=quick_reply
+            # ตรวจสอบก่อนว่า available_dates มีข้อมูลหรือไม่
+            if available_dates:
+                items = [
+                    QuickReplyButton(action=MessageAction(label=date, text=date))
+                    for date in available_dates[:13]  # จำกัดที่ 13 รายการตามข้อจำกัดของ Line
+                ]
+                
+                quick_reply = QuickReply(items=items)
+                
+                line_bot_api.reply_message(
+                    event.reply_token,
+                    TextSendMessage(
+                        text="กรุณาเลือกวันที่ต้องการนัดประชุมจากตัวเลือกที่กำหนดให้",
+                        quick_reply=quick_reply
+                    )
                 )
-            )
-    
+            # else:
+            #     # ถ้าไม่มีวันที่ในรายการ (กรณีที่ session อาจถูกล้าง) ให้เรียก API ใหม่
+            #     line_bot_api.reply_message(
+            #         event.reply_token,
+            #         TextSendMessage(text="กำลังค้นหาวันที่ว่าง โปรดรอสักครู่...")
+            #     )
+            #     # เรียก API เพื่อดึงข้อมูลวันที่ใหม่
+                
+            #     # ตั้งเวลาเรียกฟังก์ชันหลังจากส่งข้อความยืนยัน
+            #     scheduler.add_job(
+            #         func=get_available_dates_again,
+            #         trigger="date",
+            #         run_date=datetime.now() + timedelta(seconds=1)
+            #     )
     # Time slot selection
     elif session["state"] == "select_time_slot":
-        if text == "ย้อนกลับ":  # เพิ่มการจัดการปุ่มย้อนกลับ
+        if text == "ย้อนกลับ":  # จัดการปุ่มย้อนกลับ
             # กลับไปเลือกวันที่
             session["state"] = "select_date"
-            # ล้างข้อมูลวันที่ที่เลือกไว้
+            # ล้างข้อมูลเลือกเวลาที่เลือกไว้
             if "selected_date" in session:
                 del session["selected_date"]
             if "selected_date_iso" in session:
                 del session["selected_date_iso"]
-            # ส่งหน้าเลือกวันที่ใหม่
-            send_date_selection(event.reply_token, session["available_time_slots"])
-            return
             
+            # ใช้ข้อมูลวันที่ที่เก็บไว้แล้วในตัวแปร available_time_slots
+            if "available_time_slots" in session and session["available_time_slots"]:
+                # เรียกใช้ฟังก์ชันแสดงรายการวันที่
+                display_date_selection(event.reply_token, session["available_time_slots"])
+            else:
+                # กรณีที่ไม่มีข้อมูล available_time_slots จึงต้องเรียก API ใหม่
+                line_bot_api.reply_message(
+                    event.reply_token,
+                    TextSendMessage(text="กำลังค้นหาวันที่ว่าง โปรดรอสักครู่...")
+                )
+                # เรียก API เพื่อดึงข้อมูลวันที่ใหม่
+                def get_available_dates_again():
+                    try:
+                        profile_json = {
+                            "location": session.get("location"),
+                            "english_min": 5 if session.get("eng_level") == "ระดับ 5" else 4,
+                            "exp_kind": "strong" if session.get("exp") == "Strong exp" else "non",
+                            "age_key": str(session.get("age")),
+                            "start_date": datetime.now().strftime("%Y-%m-%d"),
+                            "include_holidays": True
+                        }
+
+                        response = requests.post(
+                            f"{base_url}/events/available-dates",
+                            json=profile_json,
+                            timeout=30
+                        )
+                        
+                        if response.status_code == 200:
+                            api_response = response.json()
+                            
+                            # เก็บข้อมูลวันที่ว่างสำหรับให้โค้ดส่วนอื่นใช้
+                            if "available_dates" in api_response:
+                                # สร้าง available_time_slots ในรูปแบบเดิม
+                                available_time_slots = []
+                                for date_str in api_response["available_dates"]:
+                                    available_time_slots.append({"date": date_str})
+                                session["available_time_slots"] = available_time_slots
+                            
+                            # ส่ง line_payload จาก API โดยตรง
+                            line_payload = api_response.get("line_payload", [])
+                            if line_payload:
+                                send_line_payload(user_id, line_payload)
+                        else:
+                            line_bot_api.push_message(
+                                user_id,
+                                TextSendMessage(text="❗ เกิดข้อผิดพลาดในการค้นหาวันที่ว่าง กรุณาลองใหม่ภายหลัง")
+                            )
+                    except Exception as e:
+                        print(f"❌ เกิดข้อผิดพลาดในการดึงวันที่: {e}")
+                        line_bot_api.push_message(
+                            user_id,
+                            TextSendMessage(text="เกิดข้อผิดพลาดในการเชื่อมต่อกับระบบ กรุณาลองใหม่ภายหลัง")
+                        )
+                        
+                # ตั้งเวลาเรียกฟังก์ชันหลังจากส่งข้อความยืนยัน
+                scheduler.add_job(
+                    func=get_available_dates_again,
+                    trigger="date",
+                    run_date=datetime.now() + timedelta(seconds=1)
+                )
+                
+                return
+            
+        # ตรวจสอบการเลือกช่วงเวลา โดยรองรับทั้งรูปแบบ (1), (2) หรือเลขล้วนๆ
+        slot_choice = text.strip()
+        if slot_choice.startswith("(") and slot_choice.endswith(")"):
+            slot_choice = slot_choice[1:-1]  # ตัด ( ) ออก
+        
         try:
-            slot_number = int(text.strip("()"))
-            if 1 <= slot_number <= len(session["time_slots"]):
+            slot_number = int(slot_choice)
+            if 1 <= slot_number <= len(session.get("time_slots", [])):
                 selected_time_slot = session["time_slots"][slot_number - 1]
                 session["selected_time_slot"] = selected_time_slot
-                session["state"] = "select_pair"
+                session["selected_time"] = selected_time_slot.get("time", "")  # เก็บเวลาที่เลือกไว้
                 
-                # แสดงรายการคู่ของ Manager และ Recruiter ที่ว่างในช่วงเวลานี้
-                send_pair_selection(event.reply_token, selected_time_slot)
+                # ส่งข้อความยืนยันการเลือกช่วงเวลา
+                line_bot_api.reply_message(
+                    event.reply_token,
+                    TextSendMessage(text=f"คุณเลือกเวลา {session['selected_time']} กำลังค้นหาคู่ที่ว่าง...")
+                )
                 
+                # เรียก API เพื่อดึงข้อมูลคู่ที่ว่าง
+                def get_available_pairs_later():
+                    try:
+                        # สร้าง payload สำหรับ API
+                        pair_request = {
+                            "date": session["selected_date_iso"],
+                            "time_slot": session["selected_time"],
+                            "location": session.get("location", ""),
+                            "english_min": 5 if session.get("eng_level") == "ระดับ 5" else 4,
+                            "exp_kind": "strong" if session.get("exp") == "Strong exp" else "non",
+                            "age_key": str(session.get("age", ""))
+                        }
+                        
+                        print(f"🚀 Sending request to get available pairs: {pair_request}")
+                        
+                        # เรียก API
+                        response = requests.post(
+                            f"{base_url}/events/available-pairs",
+                            json=pair_request,
+                            timeout=30
+                        )
+                        
+                        print(f"📡 API Response (status): {response.status_code}")
+                        
+                        if response.status_code == 200:
+                            api_response = response.json()
+                            print(f"📦 API Response (available_pairs): {api_response}")
+                            
+                            # เปลี่ยนสถานะเป็น select_pair
+                            session["state"] = "select_pair"
+                            
+                            # เก็บข้อมูลคู่ที่ว่างลงใน session
+                            if "available_pairs" in api_response:
+                                # อัปเดต pair_details ใน selected_time_slot
+                                session["selected_time_slot"]["pair_details"] = api_response["available_pairs"]
+                            
+                            # ส่ง line_payload จาก API โดยตรง
+                            line_payload = api_response.get("line_payload", [])
+                            if line_payload:
+                                send_line_payload(user_id, line_payload)
+                            else:
+                                # หากไม่มี line_payload ให้ใช้ฟังก์ชันเดิม
+                                send_pair_selection(user_id, session["selected_time_slot"])
+                        else:
+                            line_bot_api.push_message(
+                                user_id,
+                                TextSendMessage(text=f"❗ เกิดข้อผิดพลาดในการค้นหาคู่ที่ว่าง ({response.status_code}) กรุณาลองใหม่ภายหลัง")
+                            )
+                    except Exception as e:
+                        print(f"❌ เกิดข้อผิดพลาดในการดึงข้อมูลคู่: {e}")
+                        line_bot_api.push_message(
+                            user_id,
+                            TextSendMessage(text=f"เกิดข้อผิดพลาดในการเชื่อมต่อกับระบบ: {str(e)} กรุณาลองใหม่ภายหลัง")
+                        )
+                
+                # ตั้งเวลาเรียกฟังก์ชันหลังจากส่งข้อความยืนยัน
+                scheduler.add_job(
+                    func=get_available_pairs_later,
+                    trigger="date",
+                    run_date=datetime.now() + timedelta(seconds=1)
+                )
             else:
                 line_bot_api.reply_message(
                     event.reply_token,
-                    TextSendMessage(text="กรุณาเลือกช่วงเวลาจากตัวเลือกที่กำหนดให้")
+                    TextSendMessage(text=f"กรุณาเลือกช่วงเวลาจากตัวเลือกที่กำหนดให้ (ตัวเลข 1-{len(session.get('time_slots', []))})")
                 )
         except ValueError:
             line_bot_api.reply_message(
                 event.reply_token,
                 TextSendMessage(text="กรุณาเลือกช่วงเวลาที่ถูกต้อง")
             )
-    
-    # Pair selection
+            
+    # ส่วนการเลือกคู่
     elif session["state"] == "select_pair":
         if text == "ย้อนกลับ":  # เพิ่มการจัดการปุ่มย้อนกลับ
             # กลับไปเลือกช่วงเวลา
             session["state"] = "select_time_slot"
-            # ล้างข้อมูลช่วงเวลาที่เลือกไว้
-            if "selected_time_slot" in session:
-                del session["selected_time_slot"]
-            # ส่งหน้าเลือกช่วงเวลาใหม่
-            send_time_slots(event.reply_token, session["time_slots"], session["selected_date"])
-            return
+            # ล้างข้อมูลคู่ที่เลือกไว้
+            if "selected_pair" in session:
+                del session["selected_pair"]
+                
+            # เรียก API เพื่อดึงข้อมูลช่วงเวลาที่ว่างใหม่
+            def get_available_timeslots_again():
+                try:
+                    # สร้าง payload สำหรับ API
+                    date_request = {
+                        "date": session["selected_date_iso"],
+                        "location": session.get("location", ""),
+                        "english_min": 5 if session.get("eng_level") == "ระดับ 5" else 4,
+                        "exp_kind": "strong" if session.get("exp") == "Strong exp" else "non",
+                        "age_key": str(session.get("age", ""))
+                    }
+                    
+                    # เรียก API
+                    response = requests.post(
+                        f"{base_url}/events/available-timeslots",
+                        json=date_request,
+                        timeout=30
+                    )
+                    
+                    if response.status_code == 200:
+                        api_response = response.json()
+                        
+                        # เก็บข้อมูลช่วงเวลาที่ว่างลงใน session - ปรับให้เข้ากับข้อมูลเดิม
+                        if "available_timeslots" in api_response:
+                            time_slots = []
+                            for slot in api_response["available_timeslots"]:
+                                # แปลงข้อมูลให้เข้ากับรูปแบบเดิม
+                                pairs = []
+                                pair_details = []
+                                
+                                # สร้าง pair และ pair_details จาก available_pairs
+                                for pair_info in slot.get("available_pairs", []):
+                                    pair_name = pair_info.get("pair", "")
+                                    pairs.append(pair_name)
+                                    pair_details.append(pair_info)
+                                
+                                time_slots.append({
+                                    "time": slot.get("time_slot", ""),
+                                    "available_pairs": pairs,
+                                    "pair_details": pair_details
+                                })
+                                
+                            session["time_slots"] = time_slots
+                        
+                        # ส่ง line_payload จาก API โดยตรง
+                        line_payload = api_response.get("line_payload", [])
+                        if line_payload:
+                            send_line_payload(user_id, line_payload)
+                        else:
+                            # หากไม่มี line_payload ให้ใช้ฟังก์ชันเดิม
+                            send_time_slots(user_id, session["time_slots"], session["selected_date"])
+                    else:
+                        line_bot_api.push_message(
+                            user_id,
+                            TextSendMessage(text="❗ เกิดข้อผิดพลาดในการค้นหาช่วงเวลา กรุณาลองใหม่ภายหลัง")
+                        )
+                except Exception as e:
+                    print(f"❌ เกิดข้อผิดพลาดในการดึงช่วงเวลา: {e}")
+                    line_bot_api.push_message(
+                        user_id,
+                        TextSendMessage(text="เกิดข้อผิดพลาดในการเชื่อมต่อกับระบบ กรุณาลองใหม่ภายหลัง")
+                    )
+                    
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text=f"กลับไปยังหน้าเลือกช่วงเวลา...")
+            )
             
+            # ตั้งเวลาเรียกฟังก์ชันหลังจากส่งข้อความยืนยัน
+            scheduler.add_job(
+                func=get_available_timeslots_again,
+                trigger="date",
+                run_date=datetime.now() + timedelta(seconds=1)
+            )
+            
+            return
+                
         try:
             pair_number = int(text.strip("()"))
             if 1 <= pair_number <= len(session["selected_time_slot"]["pair_details"]):
@@ -679,7 +919,8 @@ def handle_message(event):
                 # แยกช่วงเวลาเริ่มต้นและสิ้นสุด
                 time_range = session["selected_time_slot"]["time"]
                 start_time, end_time = time_range.split("-")
-                               # สร้างรูปแบบ ISO datetime และเก็บใน session
+                
+                # สร้างรูปแบบ ISO datetime และเก็บใน session
                 session["start_time"] = f"{iso_date}T{start_time}:00+07:00"
                 session["end_time"] = f"{iso_date}T{end_time}:00+07:00"
                 print(f"✅ Start time: {session['start_time']}, End time: {session['end_time']}")
@@ -821,7 +1062,6 @@ def handle_message(event):
                 TextSendMessage(text="กรุณาเลือกจากตัวเลือกที่กำหนดให้ (สร้างนัด, ยกเลิกนัด หรือ ย้อนกลับ)")
             )
        
-
 def send_initial_options(reply_token_or_user_id):
     """ส่งข้อความแนะนำ + Quick Reply"""
     message = TextSendMessage(
@@ -837,7 +1077,6 @@ def send_initial_options(reply_token_or_user_id):
         line_bot_api.push_message(reply_token_or_user_id, message)
     else:
         line_bot_api.reply_message(reply_token_or_user_id, message)
-
 
 # สร้างฟังก์ชันใหม่สำหรับแสดงเฉพาะเมนู (ไม่มีข้อความแนะนำ)
 def send_menu_only(reply_token_or_user_id):
@@ -856,53 +1095,47 @@ def send_menu_only(reply_token_or_user_id):
     else:
         line_bot_api.reply_message(reply_token_or_user_id, message)
 
-
-        
-def send_date_selection(reply_token_or_user_id, available_time_slots):
-    """Send Quick Reply for date selection"""
-    available_dates = []
+def send_line_payload(user_id_or_reply_token, line_payload):
+    """
+    ส่ง LINE Payload ไปยัง LINE API โดยแปลงจาก dictionary เป็น LINE SDK objects
+    รองรับทั้ง user_id และ reply_token
+    """
+    is_reply_token = not (isinstance(user_id_or_reply_token, str) and user_id_or_reply_token.startswith("U"))
     
-    # แปลงวันที่จากรูปแบบ ISO เป็นรูปแบบไทย
-    for time_slot_data in available_time_slots:
-        date_str = time_slot_data.get("date", "")
-        if date_str:
-            try:
-                date_obj = datetime.strptime(date_str, "%Y-%m-%d")
-                thai_year = date_obj.year + 543  # แปลงปี ค.ศ. เป็น พ.ศ.
-                thai_date = f"{date_obj.day}/{date_obj.month}/{thai_year}"
-                available_dates.append(thai_date)
-            except ValueError:
-                pass
-    
-    if not available_dates:
-        # ถ้าไม่มีวันที่ใด ให้แจ้งผู้ใช้
-        message = TextSendMessage(
-            text="ไม่พบวันที่ว่างในระบบ กรุณาติดต่อผู้ดูแลระบบ"
-        )
-        if reply_token_or_user_id in user_sessions:
-            user_sessions[reply_token_or_user_id]["state"] = "initial"
-    else:
-        # สร้าง Quick Reply สำหรับเลือกวันที่
-        items = [
-            QuickReplyButton(action=MessageAction(label=date, text=date))
-            for date in available_dates[:13]  # จำกัดที่ 13 รายการตามข้อจำกัดของ Line
-        ]
-        
-        quick_reply = QuickReply(items=items)
-        
-        message = TextSendMessage(
-            text="กรุณาเลือกวันที่ต้องการนัดประชุม",
-            quick_reply=quick_reply
-        )
-    
-    # Handle both reply_token and user_id
-    if isinstance(reply_token_or_user_id, str) and reply_token_or_user_id.startswith("U"):
-        # It's a user_id
-        line_bot_api.push_message(reply_token_or_user_id, message)
-    else:
-        # It's a reply_token
-        line_bot_api.reply_message(reply_token_or_user_id, message)
-
+    for message_dict in line_payload:
+        # แปลง dictionary เป็น LINE SDK object
+        if message_dict["type"] == "text":
+            # TextSendMessage
+            if "quickReply" in message_dict:
+                # มี Quick Reply
+                items = []
+                for item in message_dict["quickReply"]["items"]:
+                    if item["type"] == "action" and item["action"]["type"] == "message":
+                        items.append(
+                            QuickReplyButton(
+                                action=MessageAction(
+                                    label=item["action"]["label"],
+                                    text=item["action"]["text"]
+                                )
+                            )
+                        )
+                
+                quick_reply = QuickReply(items=items)
+                message = TextSendMessage(
+                    text=message_dict["text"],
+                    quick_reply=quick_reply
+                )
+            else:
+                # ไม่มี Quick Reply
+                message = TextSendMessage(text=message_dict["text"])
+            
+            # ส่งข้อความ
+            if is_reply_token:
+                line_bot_api.reply_message(user_id_or_reply_token, message)
+            else:
+                line_bot_api.push_message(user_id_or_reply_token, message)
+                
+        # สามารถเพิ่มเงื่อนไขสำหรับประเภทข้อความอื่นๆ เช่น image, template, flex ได้ตามต้องการ
 def send_time_slots(reply_token_or_user_id, time_slots, selected_date):
     """Send available time slots"""
     # Create message with available time slots
@@ -934,7 +1167,6 @@ def send_time_slots(reply_token_or_user_id, time_slots, selected_date):
     else:
         line_bot_api.reply_message(reply_token_or_user_id, message)
 
- 
 def send_pair_selection(reply_token, time_slot):
     """Send Manager-Recruiter pairs for selection"""
     # Create message with available pairs
@@ -1032,6 +1264,195 @@ def send_book_meeting(meeting_result):
                 print("✅ POST สำเร็จ:", response.status_code)
             except Exception as e:
                 print("❌ POST ล้มเหลว:", str(e))
+def display_date_selection(reply_token_or_user_id, available_time_slots):
+    """
+    แสดงรายการวันที่ให้เลือกจากข้อมูล available_time_slots
+    ใช้ข้อมูลที่มีอยู่แล้วโดยไม่ต้องเรียก API ใหม่
+    """
+    available_dates = []
+    
+    # แปลงข้อมูลวันที่จากรูปแบบ ISO เป็นรูปแบบไทย (วว/ดด/25XX)
+    for time_slot_data in available_time_slots:
+        date_str = time_slot_data.get("date", "")
+        if date_str:
+            try:
+                date_obj = datetime.strptime(date_str, "%Y-%m-%d")
+                thai_year = date_obj.year + 543  # แปลงปี ค.ศ. เป็น พ.ศ.
+                thai_date = f"{date_obj.day}/{date_obj.month}/{thai_year}"
+                available_dates.append(thai_date)
+            except ValueError:
+                pass
+    
+    if not available_dates:
+        # ถ้าไม่มีวันที่ใด ให้แจ้งผู้ใช้
+        message = TextSendMessage(
+            text="ไม่พบวันที่ว่างในระบบ กรุณาติดต่อผู้ดูแลระบบ"
+        )
+    else:
+        # สร้าง Quick Reply สำหรับเลือกวันที่
+        items = [
+            QuickReplyButton(action=MessageAction(label=date, text=date))
+            for date in available_dates[:13]  # จำกัดที่ 13 รายการตามข้อจำกัดของ Line
+        ]
+        
+        quick_reply = QuickReply(items=items)
+        
+        message = TextSendMessage(
+            text="กรุณาเลือกวันที่ต้องการนัดประชุม",
+            quick_reply=quick_reply
+        )
+    
+    # ส่งข้อความ (รองรับทั้ง reply_token และ user_id)
+    if isinstance(reply_token_or_user_id, str) and reply_token_or_user_id.startswith("U"):
+        # It's a user_id
+        line_bot_api.push_message(reply_token_or_user_id, message)
+    else:
+        # It's a reply_token
+        line_bot_api.reply_message(reply_token_or_user_id, message)
+        
+def display_time_slot_selection(reply_token_or_user_id, time_slots, selected_date):
+    """
+    แสดงรายการช่วงเวลาให้เลือกจากข้อมูล time_slots
+    ใช้ข้อมูลที่มีอยู่แล้วโดยไม่ต้องเรียก API ใหม่
+    """
+    slot_texts = []
+
+    for i, slot in enumerate(time_slots[:12], start=1):  # จำกัดที่ 12 อัน
+        pairs_text = "\n   " + "\n   ".join([f"👥{pair}" for pair in slot.get("available_pairs", [])])
+        slot_text = f"{i}. เวลา {slot.get('time', '')}{pairs_text}"
+        slot_texts.append(slot_text)
+
+    if not slot_texts:
+        # ถ้าไม่มีช่วงเวลา ให้แจ้งผู้ใช้
+        message = TextSendMessage(
+            text="ไม่พบช่วงเวลาว่างในวันที่เลือก กรุณาเลือกวันที่อื่น"
+        )
+    else:
+        message_text = f"กรุณาเลือกช่วงเวลาที่ต้องการ:\nวันที่ : {selected_date}\n" + "\n".join(slot_texts)
+
+        # สร้างปุ่ม quick reply สำหรับช่วงเวลา
+        items = [
+            QuickReplyButton(action=MessageAction(label=f"({i})", text=f"({i})"))
+            for i in range(1, len(slot_texts) + 1)
+        ]
+
+        # เพิ่มปุ่มย้อนกลับ
+        items.append(QuickReplyButton(action=MessageAction(label="ย้อนกลับ", text="ย้อนกลับ")))
+
+        quick_reply = QuickReply(items=items)
+
+        message = TextSendMessage(text=message_text, quick_reply=quick_reply)
+
+    # ส่งข้อความ (รองรับทั้ง reply_token และ user_id)
+    if isinstance(reply_token_or_user_id, str) and reply_token_or_user_id.startswith("U"):
+        # It's a user_id
+        line_bot_api.push_message(reply_token_or_user_id, message)
+    else:
+        # It's a reply_token
+        line_bot_api.reply_message(reply_token_or_user_id, message)
+
+def display_pair_selection(reply_token_or_user_id, time_slot):
+    """
+    แสดงรายการคู่ Manager-Recruiter ให้เลือกจากข้อมูล time_slot
+    ใช้ข้อมูลที่มีอยู่แล้วโดยไม่ต้องเรียก API ใหม่
+    """
+    if not time_slot or "pair_details" not in time_slot:
+        # ถ้าไม่มีข้อมูลคู่ ให้แจ้งผู้ใช้
+        message = TextSendMessage(
+            text="ไม่พบข้อมูลคู่ Manager-Recruiter ที่ว่าง กรุณาเลือกช่วงเวลาใหม่"
+        )
+    else:
+        pairs = time_slot["pair_details"]
+        
+        if not pairs:
+            message = TextSendMessage(
+                text="ไม่พบคู่ Manager-Recruiter ที่ว่างในช่วงเวลานี้ กรุณาเลือกช่วงเวลาอื่น"
+            )
+        else:
+            message_text = f"กรุณาเลือก Manager-Recruiter ที่จะนัด\nเวลา {time_slot.get('time', '')}\n"
+            
+            for i, pair_detail in enumerate(pairs, start=1):
+                message_text += f"   {i}.👥 {pair_detail.get('pair', '')}\n"
+            
+            # สร้างปุ่ม quick reply สำหรับเลือกคู่ (สูงสุด 12 รายการ + ปุ่มย้อนกลับ)
+            items = [
+                QuickReplyButton(action=MessageAction(label=f"({i})", text=f"({i})"))
+                for i in range(1, min(len(pairs) + 1, 13))
+            ]
+            
+            # เพิ่มปุ่มย้อนกลับ
+            items.append(QuickReplyButton(action=MessageAction(label="ย้อนกลับ", text="ย้อนกลับ")))
+            
+            quick_reply = QuickReply(items=items)
+            
+            message = TextSendMessage(text=message_text, quick_reply=quick_reply)
+    
+    # ส่งข้อความ (รองรับทั้ง reply_token และ user_id)
+    if isinstance(reply_token_or_user_id, str) and reply_token_or_user_id.startswith("U"):
+        # It's a user_id
+        line_bot_api.push_message(reply_token_or_user_id, message)
+    else:
+        # It's a reply_token
+        line_bot_api.reply_message(reply_token_or_user_id, message)
+
+#API FUNCTION
+def background_post_and_push(user_id, session_data):
+                try:
+                    profile_json = {
+                        "location": session_data.get("location"),
+                        "english_min": 5 if session_data.get("eng_level") == "ระดับ 5" else 4,
+                        "exp_kind": "strong" if session_data.get("exp") == "Strong exp" else "non",
+                        "age_key": str(session_data.get("age")),
+                        "start_date": datetime.now().strftime("%Y-%m-%d"),
+                        "include_holidays": True
+                    }
+                    # print("🚀 Background Started with data:", profile_json)
+
+                    response = requests.post(
+                        f"{base_url}/events/available-dates",
+                        json=profile_json,
+                        timeout=30
+                    )
+                    response.raise_for_status()
+                    api_response = response.json()
+                    print(api_response)
+                    
+                    if response.status_code == 200:
+                        user_sessions[user_id]["state"] = "select_date"
+                        
+                        # เก็บข้อมูลวันที่สำหรับให้โค้ดส่วนอื่นใช้
+                        if "available_dates" in api_response:
+                            # สร้าง available_time_slots ในรูปแบบเดิม
+                            available_time_slots = []
+                            for date_str in api_response["available_dates"]:
+                                available_time_slots.append({"date": date_str})
+                            user_sessions[user_id]["available_time_slots"] = available_time_slots
+                        
+                        # แสดงข้อความยืนยันการบันทึกข้อมูล
+                        line_bot_api.push_message(
+                            user_id,
+                            TextSendMessage(text="บันทึกข้อมูลเรียบร้อยแล้ว ต่อไปเป็นการนัดประชุม")
+                        )
+                        
+                        # ส่ง line_payload ไปที่ LINE API
+                        line_payload = api_response.get("line_payload", [])
+                        print(line_payload)
+                        if line_payload:
+                            send_line_payload(user_id, line_payload)
+                        
+                    else:
+                        line_bot_api.push_message(
+                            user_id,
+                            TextSendMessage(text="❗ เกิดข้อผิดพลาด กรุณาลองใหม่ภายหลัง")
+                        )
+                    
+                    print("✅ ส่งข้อมูล Manager ไปยัง API แล้ว:", response.status_code)
+                except Exception as e:
+                    print("❌ ส่งข้อมูลล้มเหลว:", e)
+                    line_bot_api.push_message(
+                        user_id,
+                        TextSendMessage(text="เกิดข้อผิดพลาดในการเชื่อมต่อกับระบบ กรุณาลองใหม่ภายหลัง")
+                    )
 
 
 if __name__ == "__main__":

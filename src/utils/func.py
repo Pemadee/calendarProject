@@ -251,7 +251,10 @@ def get_people(file_path,
 
     # ---------- 8) กรอง Age ----------
     if age_key and 'Age' in df_M.columns:
+        df_M['Age'] = df_M['Age'].astype(str)
         df_M = df_M[df_M['Age'].str.contains(age_key, case=False, na=False)]
+    
+    print(df_M)
 
     # ---------- 9) เตรียมผลลัพธ์ (dict → list ของ dict) ----------
     list_M = (
