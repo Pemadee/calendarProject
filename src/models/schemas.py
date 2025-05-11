@@ -16,15 +16,14 @@ class UsersRequest(BaseModel):
     start_time: Optional[str] = None  # เช่น "18:30:00"
     end_time: Optional[str] = None    # เช่น "19:00:00"
 
-# โมเดลสำหรับการนัดหมายพร้อมกันหลายคน
+# ปรับโมเดลใหม่ให้รับข้อมูลในรูปแบบที่เข้าใจง่าย
 class BulkEventRequest(BaseModel):
-    user_emails: List[str]  # รายชื่ออีเมลของผู้ที่จะสร้างปฏิทิน
-    summary: str
-    description: Optional[str] = None
-    location: Optional[str] = None
-    start_time: str  # รูปแบบ ISO format เช่น "2025-04-20T09:00:00+07:00"
-    end_time: str    # รูปแบบ ISO format เช่น "2025-04-20T10:00:00+07:00"
-    attendees: Optional[List[str]] = None  # รายชื่ออีเมลของผู้เข้าร่วมเพิ่มเติม (จะถูกเพิ่มในทุกปฏิทิน)
+    name_pair: str  # รับในรูปแบบ "name1-name2"
+    location: str   # เช่น "Silom", "Asoke" เป็นต้น
+    event_location: Optional[str] = None
+    date: str       # รูปแบบ "YYYY-MM-DD" เช่น "2025-05-27"
+    time: str       # รูปแบบ "HH:MM-HH:MM" เช่น "09:30-10:00"
+    attendees: Optional[List[str]] = None  # รายชื่ออีเมลของผู้เข้าร่วมเพิ่มเติม
 
 # โมเดลสำหรับรับข้อมูลผู้ใช้หลายคน จากข้อมูลใน excel
 class ManagerRecruiter(BaseModel):
