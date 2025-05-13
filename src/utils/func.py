@@ -403,25 +403,21 @@ def refresh_token_safe(user_email: str):
 
 # เพิ่มฟังก์ชันสำหรับการค้นหาอีเมลจาก Excel
 
-def find_emails_from_name_pair(name_pair):
+def find_emails_from_name_pair(name_pair, location):
     """
-    รับชื่อในรูปแบบ "name1-name2" และค้นหาอีเมลจาก Excel
+    รับชื่อในรูปแบบ "name1-name2" และ location เพื่อค้นหาอีเมลจาก Excel
     
     Args:
         name_pair (str): ชื่อในรูปแบบ "name1-name2"
+        location (str): สถานที่ เช่น "Silom", "Asoke" เป็นต้น
         
     Returns:
-        List[str]: รายการอีเมลที่ค้นพบ (จะมี 2 อีเมล)
+        dict: ข้อมูลอีเมลที่ค้นพบ ประกอบด้วย name1_email, name2_email, name1, name2
     """
     # อ่านไฟล์ Excel
     try:
         # ปรับ path ตามที่เก็บไฟล์จริง
-        excel_path = str(FILE_PATH)  
-        df = pd.read_excel(excel_path)
-        
-        # ตรวจสอบว่ามีคอลัมน์ที่ต้องการหรือไม่
-        if 'M' not in df.columns or 'R' not in df.columns or 'Email' not in df.columns:
-            raise ValueError("ไม่พบคอลัมน์ที่จำเป็น (M, R, Email) ในไฟล์ Excel")
+        excel_path = str(FILE_PATH)
         
         # แยกชื่อ
         try:
@@ -429,31 +425,90 @@ def find_emails_from_name_pair(name_pair):
         except ValueError:
             raise ValueError(f"รูปแบบชื่อไม่ถูกต้อง: {name_pair} (ต้องเป็น 'name1-name2')")
         
-        # เก็บอีเมลที่พบ
-        emails = []
+        # อ่านข้อมูลจากชีต M
+        df_m = pd.read_excel(excel_path, sheet_name='M')
         
-        # ค้นหา name1 ในคอลัมน์ M
-        email1_row = df[df['M'] == name1]
-        if not email1_row.empty and 'Email' in email1_row.columns:
-            email1 = email1_row.iloc[0]['Email']
-            emails.append(email1)
-        else:
-            raise ValueError(f"ไม่พบอีเมลสำหรับชื่อ {name1} ในคอลัมน์ M")
+        # อ่านข้อมูลจากชีต R
+        df_r = pd.read_excel(excel_path, sheet_name='R')
         
-        # ค้นหา name2 ในคอลัมน์ R
-        email2_row = df[df['R'] == name2]
-        if not email2_row.empty and 'Email' in email2_row.columns:
-            email2 = email2_row.iloc[0]['Email']
-            emails.append(email2)
-        else:
-            raise ValueError(f"ไม่พบอีเมลสำหรับชื่อ {name2} ในคอลัมน์ R")
+        # ค้นหาในชีต M
+        email1 = None
+        for i in range(len(df_m)):
+            # ตรวจสอบว่าเป็นหัวข้อ location ที่ต้องการหรือไม่
+            if df_m.iloc[i, 0] == location:
+                # ค้นหาในแถวถัดๆ ไปจนกว่าจะเจอ location ถัดไป
+                j = i + 1
+                while j < len(df_m) and not pd.isna(df_m.iloc[j, 0]) and not df_m.iloc[j, 0] in ["Silom", "Asoke", "Phuket", "Pattaya", "Samui", "Huahin", "Chiangmai"]:
+                    if df_m.iloc[j, 0] == name1:
+                        # พบชื่อที่ต้องการ ค้นหาอีเมลในคอลัมน์ Email
+                        if 'Email' in df_m.columns:
+                            email_col_idx = df_m.columns.get_loc('Email')
+                            email1 = df_m.iloc[j, email_col_idx]
+                            if pd.isna(email1):
+                                raise ValueError(f"พบชื่อ {name1} แล้ว แต่ไม่มีข้อมูลอีเมล")
+                            break
+                    j += 1
+                break
         
-        return emails
+        if email1 is None:
+            raise ValueError(f"ไม่พบอีเมลสำหรับชื่อ {name1} ในพื้นที่ {location} ในชีต M")
+        
+        # ค้นหาในชีต R
+        email2 = None
+        for i in range(len(df_r)):
+            # ตรวจสอบว่าเป็นหัวข้อ location ที่ต้องการหรือไม่
+            if df_r.iloc[i, 0] == location:
+                # ค้นหาในแถวถัดๆ ไปจนกว่าจะเจอ location ถัดไป
+                j = i + 1
+                while j < len(df_r) and not pd.isna(df_r.iloc[j, 0]) and not df_r.iloc[j, 0] in ["Silom", "Asoke", "Phuket", "Pattaya", "Samui", "Huahin", "Chiangmai"]:
+                    if df_r.iloc[j, 0] == name2:
+                        # พบชื่อที่ต้องการ ค้นหาอีเมลในคอลัมน์ Email
+                        if 'Email' in df_r.columns:
+                            email_col_idx = df_r.columns.get_loc('Email')
+                            email2 = df_r.iloc[j, email_col_idx]
+                            if pd.isna(email2):
+                                raise ValueError(f"พบชื่อ {name2} แล้ว แต่ไม่มีข้อมูลอีเมล")
+                            break
+                    j += 1
+                break
+        
+        if email2 is None:
+            raise ValueError(f"ไม่พบอีเมลสำหรับชื่อ {name2} ในพื้นที่ {location} ในชีต R")
+        
+        # คืนค่าเป็น dict ที่มีข้อมูลที่ต้องการทั้งหมด
+        return {
+            "name1_email": email1,
+            "name2_email": email2,
+            "name1": name1,  # เพิ่มชื่อโดยตรง ไม่ใช่อยู่ใน list
+            "name2": name2   # เพิ่มชื่อโดยตรง ไม่ใช่อยู่ใน list
+        }
         
     except Exception as e:
         raise Exception(f"เกิดข้อผิดพลาดในการอ่านข้อมูลจาก Excel: {str(e)}")
 
-
+# ฟังก์ชันแปลงเวลาจากรูปแบบที่เข้าใจง่ายเป็นรูปแบบ ISO
+def convert_to_iso_format(date, time):
+    """
+    แปลงข้อมูลวันที่และเวลาจากรูปแบบง่ายๆ เป็นรูปแบบ ISO
+    
+    Args:
+        date (str): วันที่ในรูปแบบ "YYYY-MM-DD"
+        time (str): เวลาในรูปแบบ "HH:MM-HH:MM"
+        
+    Returns:
+        tuple: (start_time, end_time) ในรูปแบบ ISO format
+    """
+    try:
+        # แยกเวลาเริ่มต้นและสิ้นสุด
+        start_time, end_time = time.split('-')
+        
+        # สร้าง datetime objects
+        start_datetime = f"{date}T{start_time}:00+07:00"
+        end_datetime = f"{date}T{end_time}:00+07:00"
+        
+        return start_datetime, end_datetime
+    except Exception as e:
+        raise ValueError(f"รูปแบบวันที่หรือเวลาไม่ถูกต้อง: {str(e)}")
 
 
 
