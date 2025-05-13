@@ -39,12 +39,9 @@ def update_token(email, access_token, refresh_token, expiry):
 def get_all_emails():
     db = SessionLocal()
     try:
-        result = db.query(Token.email).all() # ดึงเฉพาะคอลัมน์ email จากตาราง tokens
-        email_list = [] # สร้าง list ของ dictionary ที่มีแค่ key "email"
-        for item in result:
-            email_list.append({"email": item.email})
-        
-        return email_list
+        result = db.query(Token.email).all()
+        emails = [item.email for item in result]
+        return emails
     finally:
         db.close()
 
