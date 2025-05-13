@@ -30,6 +30,7 @@ from src.utils.func import *
 from src.models.schemas import *
 import logging
 from src.utils.token_db import *
+from src.models.token_model import TokenResponse, EmailResponse
 
 logging.basicConfig(level=logging.INFO)
 
@@ -556,32 +557,6 @@ def get_multiple_users_events(request: ManagerRecruiter):
     
     return JSONResponse(content=response)
 
-@app.delete("/auth/revoke/{user_email}")
-def revoke_auth(user_email: str):
-    """ยกเลิกการยืนยันตัวตนของผู้ใช้โดยลบข้อมูล token ใน DB"""
-    from src.utils.token_db import delete_token
-    
-    try:
-        result = delete_token(user_email)
-        if result:
-            return {
-                "email": user_email,
-                "success": True,
-                "message": f"ยกเลิกการยืนยันตัวตนสำหรับ {user_email} สำเร็จ"
-            }
-        else:
-            return {
-                "email": user_email,
-                "success": False,
-                "message": f"ไม่พบข้อมูลการยืนยันตัวตนสำหรับ {user_email}"
-            }
-    except Exception as e:
-        return {
-            "email": user_email,
-            "success": False,
-            "message": f"เกิดข้อผิดพลาดในการยกเลิกการยืนยันตัวตน: {str(e)}"
-        }
-    
 @app.post("/events/create-bulk")
 def create_bulk_events(event_request: BulkEventRequest):
     """สร้างการนัดหมายพร้อมกันสำหรับหลายผู้ใช้ โดยมีรายละเอียดเดียวกัน"""
@@ -1102,27 +1077,9 @@ def get_available_time_slots(request: ManagerRecruiter):
     
     return JSONResponse(content=response)
 
-@app.get("/test/auto-refresh")
-def trigger_auto_refresh():
-    """เรียกใช้ auto_refresh_tokens เพื่อทดสอบทันที"""
-    from src.utils.auto_refresh_jobs import auto_refresh_tokens
-    
-    try:
-        # เรียกใช้ฟังก์ชันโดยตรง
-        auto_refresh_tokens()
-        return {"status": "success", "message": "Auto refresh tokens triggered successfully"}
-    except Exception as e:
-        return {"status": "error", "message": f"Error triggering auto refresh: {str(e)}"}
 
-def create_line_payload(messages):
-    """
-    แปลงข้อความเป็นรูปแบบ LINE Payload
-    """
-    if not isinstance(messages, list):
-        messages = [messages]
-    
-    return {"line_payload": messages}
 
+# ======================== /events/availableMR แต่หั่นเป็น 3 ส่วน =================================
 @app.post("/events/available-dates")
 def get_available_dates(request: ManagerRecruiter2):
     """
@@ -1340,7 +1297,6 @@ def get_available_dates(request: ManagerRecruiter2):
         headers={"Response-Type": "object"}
     )
 
-# API 2: ดึงช่วงเวลาและคู่ในวันที่เลือก
 @app.post("/events/available-timeslots")
 def get_available_timeslots(request: DateRequest):
     """
@@ -1556,8 +1512,6 @@ def get_available_timeslots(request: DateRequest):
         headers={"Response-Type": "object"}
     )
 
-
-# API 3: ดึงรายละเอียดของคู่ที่ว่างในช่วงเวลาที่เลือก
 @app.post("/events/available-pairs")
 def get_available_pairs(request: TimeSlotRequest):
     """
@@ -1756,3 +1710,83 @@ def get_available_pairs(request: TimeSlotRequest):
         content=response,
         headers={"Response-Type": "object"}
     )
+
+# =============================================================================================
+
+
+
+# ======================== ส่วนที่เกี่ยวกับ DB ========================================
+@app.get("/auto-refresh")
+def trigger_auto_refresh():
+    """เรียกใช้ auto_refresh_tokens เพื่อทดสอบทันที"""
+    from src.utils.auto_refresh_jobs import auto_refresh_tokens
+    
+    try:
+        # เรียกใช้ฟังก์ชันโดยตรง
+        auto_refresh_tokens()
+        return {"status": "success", "message": "Auto refresh tokens triggered successfully"}
+    except Exception as e:
+        return {"status": "error", "message": f"Error triggering auto refresh: {str(e)}"}
+
+@app.get("/api/tokens", response_model=List[TokenResponse])
+async def read_all_tokens():
+    """
+    API endpoint สำหรับดึงข้อมูลทั้งหมด
+    """
+    tokens = get_all_tokens()
+    if not tokens:
+        return []
+    return tokens
+
+@app.get("/api/tokens/{email}", response_model=TokenResponse)
+async def read_token(email: str):
+    """
+    API endpoint สำหรับดึงข้อมูลตามแต่ละ email
+    """
+    token = get_token(email)
+    if token is None:
+        raise HTTPException(status_code=404, detail=f"ไม่พบข้อมูลสำหรับ email: {email}")
+    return token
+
+@app.get("/api/emails", response_model=List[EmailResponse])
+async def read_all_emails():
+    """
+    API endpoint สำหรับดึงเฉพาะ email ทั้งหมด
+    """
+    emails = get_all_emails()
+    if not emails:
+        return []
+    return emails
+
+@app.delete("/api/revoke/{user_email}")
+def revoke_auth(user_email: str):
+    """ยกเลิกการยืนยันตัวตนของผู้ใช้โดยลบข้อมูล token ใน DB"""
+    from src.utils.token_db import delete_token
+    
+    try:
+        result = delete_token(user_email)
+        if result:
+            return {
+                "email": user_email,
+                "success": True,
+                "message": f"ยกเลิกการยืนยันตัวตนสำหรับ {user_email} สำเร็จ"
+            }
+        else:
+            return {
+                "email": user_email,
+                "success": False,
+                "message": f"ไม่พบข้อมูลการยืนยันตัวตนสำหรับ {user_email}"
+            }
+    except Exception as e:
+        return {
+            "email": user_email,
+            "success": False,
+            "message": f"เกิดข้อผิดพลาดในการยกเลิกการยืนยันตัวตน: {str(e)}"
+        }
+ 
+
+# =============================================================================================
+
+
+
+

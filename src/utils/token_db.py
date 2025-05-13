@@ -15,7 +15,6 @@ def get_all_tokens():
     finally:
         db.close()
 
-
 def update_token(email, access_token, refresh_token, expiry):
     db = SessionLocal()
     try:
@@ -36,3 +35,39 @@ def update_token(email, access_token, refresh_token, expiry):
         db.commit()
     finally:
         db.close()
+
+def get_all_emails():
+    db = SessionLocal()
+    try:
+        result = db.query(Token.email).all() # ดึงเฉพาะคอลัมน์ email จากตาราง tokens
+        email_list = [] # สร้าง list ของ dictionary ที่มีแค่ key "email"
+        for item in result:
+            email_list.append({"email": item.email})
+        
+        return email_list
+    finally:
+        db.close()
+
+def delete_token(email: str) -> bool:
+    """
+    ลบข้อมูล token ตาม email
+    """
+    db = SessionLocal()
+    try:
+        # ค้นหา token ตาม email
+        token = db.query(Token).filter(Token.email == email).first()
+        
+        if token is None:
+            return False
+        
+        # ลบข้อมูล
+        db.delete(token)
+        db.commit()
+        return True
+    except Exception as e:
+        db.rollback()# กรณีเกิดข้อผิดพลาดกับฐานข้อมูล ให้ rollback
+        raise Exception(f"เกิดข้อผิดพลาดในการลบข้อมูลจากฐานข้อมูล: {str(e)}")
+    finally:
+        db.close()
+
+
