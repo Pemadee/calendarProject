@@ -3,6 +3,7 @@ import asyncio
 import json
 import os
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 import time as timeTest
 import ssl
 import sys
@@ -14,6 +15,7 @@ from dotenv import load_dotenv
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request, logger
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.templating import Jinja2Templates
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
@@ -36,6 +38,11 @@ logging.basicConfig(level=logging.INFO)
 
 
 load_dotenv()
+
+BASE_DIR = Path(__file__).resolve().parent
+templates_path = os.path.join(BASE_DIR, "templates")
+templates = Jinja2Templates(directory=templates_path)
+
 
 app = FastAPI(title="Google Calendar API", 
               description="API สำหรับดึงข้อมูลการลงเวลาจาก Google Calendar")
@@ -1793,104 +1800,216 @@ def get_available_timeslots(request: DateRequest):
     )
 
 # API 3: ดึงรายละเอียดของคู่ที่ว่างในช่วงเวลาที่เลือก
-
+@app.post("/events/available-pairs")
+def get_available_pairs(request: TimeSlotRequest):
+    """
+    ดึงข้อมูลคู่ที่ว่างในช่วงเวลาที่ระบุ
+    แสดงรายละเอียดของ manager และ recruiter ที่ว่างในช่วงเวลานั้น
+    """
+    start = timeTest.time()
+    print(f"[START] API started at {start:.6f}")
+    # ใช้ฟังก์ชัน get_people เพื่อรับรายชื่ออีเมลผู้ใช้แยกตามประเภท M และ R
+    t1 = timeTest.time()
+    users_dict = get_people(
+        file_path=str(FILE_PATH),
+        location=request.location,
+        english_min=request.english_min,
+        exp_kind=request.exp_kind,
+        age_key=request.age_key
+    )
+    print(f"[LOG] get_people done in {timeTest.time() - t1:.3f}s")
+    # แยกเวลาเริ่มต้นและสิ้นสุดจาก time_slot
+    time_parts = request.time_slot.split("-")
+    start_time_str = time_parts[0]
+    end_time_str = time_parts[1]
+    
+    # สร้าง datetime object
+    date = datetime.fromisoformat(request.date).date()
+    start_hour, start_minute = map(int, start_time_str.split(":"))
+    end_hour, end_minute = map(int, end_time_str.split(":"))
+    
+    slot_start = datetime.combine(date, time(start_hour, start_minute)).astimezone(timezone.utc)
+    slot_end = datetime.combine(date, time(end_hour, end_minute)).astimezone(timezone.utc)
+    
+    # สร้างช่วงวันสำหรับดึงข้อมูลปฏิทิน (เพื่อดึงข้อมูลทั้งวัน)
+    start_datetime = datetime.combine(date, time(0, 0, 0)).astimezone(timezone.utc)
+    end_datetime = datetime.combine(date, time(23, 59, 59)).astimezone(timezone.utc)
+    
+    time_min = start_datetime.strftime("%Y-%m-%dT%H:%M:%SZ")
+    time_max = end_datetime.strftime("%Y-%m-%dT%H:%M:%SZ")
+    t2 = timeTest.time()
+    # ดึงข้อมูลกิจกรรมสำหรับ Manager และ Recruiter
+    managers_events = {}
+    for user_info in users_dict['M']:
+        email = user_info["Email"]
+        name = user_info["Name"]
+        calendar_id = email
+        
+        if is_token_valid(email):
+            try:
+                # ดึง token จาก DB
+                token_entry = get_token(email)
+                creds = Credentials(
+                    token=token_entry.access_token,
+                    refresh_token=token_entry.refresh_token,
+                    token_uri="https://oauth2.googleapis.com/token",
+                    client_id=CLIENT_ID,
+                    client_secret=CLIENT_SECRET,
+                    scopes=SCOPES
+                )
+                service = build('calendar', 'v3', credentials=creds)
+                
+                events_result = service.events().list(
+                    calendarId=calendar_id,
+                    timeMin=time_min,
+                    timeMax=time_max,
+                    singleEvents=True,
+                    orderBy='startTime'
+                ).execute()
+                
+                events = events_result.get('items', [])
+                
+                # เก็บข้อมูลกิจกรรม
+                managers_events[email] = {
+                    'name': name,
+                    'events': events
+                }
+            except Exception as e:
+                print(f"เกิดข้อผิดพลาดในการดึงข้อมูลสำหรับ M: {email}: {str(e)}")
+        else:
+            print(f"ผู้ใช้ {email} ยังไม่ได้ยืนยันตัวตน")
+    print(f"[LOG] get_managers_events done in {timeTest.time() - t2:.3f}s")
+    t3 = timeTest.time()
+    recruiters_events = {}
+    for user_info in users_dict['R']:
+        email = user_info["Email"]
+        name = user_info["Name"]
+        calendar_id = email
+        
+        if is_token_valid(email):
+            try:
+                # ดึง token จาก DB
+                token_entry = get_token(email)
+                creds = Credentials(
+                    token=token_entry.access_token,
+                    refresh_token=token_entry.refresh_token,
+                    token_uri="https://oauth2.googleapis.com/token",
+                    client_id=CLIENT_ID,
+                    client_secret=CLIENT_SECRET,
+                    scopes=SCOPES
+                )
+                service = build('calendar', 'v3', credentials=creds)
+                
+                events_result = service.events().list(
+                    calendarId=calendar_id,
+                    timeMin=time_min,
+                    timeMax=time_max,
+                    singleEvents=True,
+                    orderBy='startTime'
+                ).execute()
+                
+                events = events_result.get('items', [])
+                
+                # เก็บข้อมูลกิจกรรม
+                recruiters_events[email] = {
+                    'name': name,
+                    'events': events
+                }
+            except Exception as e:
+                print(f"เกิดข้อผิดพลาดในการดึงข้อมูลสำหรับ R: {email}: {str(e)}")
+        else:
+            print(f"ผู้ใช้ {email} ยังไม่ได้ยืนยันตัวตน")
+    print(f"[LOG] get_recruiters_events done in {timeTest.time() - t3:.3f}s")
+    # เก็บคู่ที่ว่างในช่วงเวลาที่ระบุ
+    available_pairs = []
+    t4 = timeTest.time()
+    for manager_email, manager_data in managers_events.items():
+        manager_name = manager_data['name']
+        manager_events = manager_data['events']
+        
+        for recruiter_email, recruiter_data in recruiters_events.items():
+            recruiter_name = recruiter_data['name']
+            recruiter_events = recruiter_data['events']
+            
+            # ตรวจสอบว่าทั้งคู่ว่างหรือไม่
+            manager_is_available = is_available(manager_events, slot_start, slot_end)
+            recruiter_is_available = is_available(recruiter_events, slot_start, slot_end)
+            
+            if manager_is_available and recruiter_is_available:
+                available_pairs.append({
+                    "pair": f"{manager_name}-{recruiter_name}",
+                    "manager": {
+                        "email": manager_email,
+                        "name": manager_name
+                    },
+                    "recruiter": {
+                        "email": recruiter_email,
+                        "name": recruiter_name
+                    }
+                })
+    print(f"[LOG] get_available_pairs done in {timeTest.time() - t4:.3f}s")
+    # สร้างข้อความและตัวเลือกในรูปแบบ LINE Message
+    message_text = f"กรุณาเลือก Manager-Recruiter ที่จะนัด\nเวลา {request.time_slot}\n"
+    items = []
+    
+    for i, pair_detail in enumerate(available_pairs, start=1):
+        message_text += f"   {i}.👥 {pair_detail['pair']}\n"
+        
+        # สร้างปุ่ม quick reply (สูงสุด 12 รายการเพื่อเหลือที่สำหรับปุ่มย้อนกลับ)
+        if i < 13:
+            items.append({
+                "type": "action",
+                "action": {
+                    "type": "message",
+                    "label": f"({i})",
+                    "text": f"({i})"
+                }
+            })
+    
+    # เพิ่มปุ่มย้อนกลับ
+    items.append({
+        "type": "action",
+        "action": {
+            "type": "message",
+            "label": "ย้อนกลับ",
+            "text": "ย้อนกลับ"
+        }
+    })
+    
+    line_message = {
+        "type": "text",
+        "text": message_text,
+        "quickReply": {
+            "items": items
+        }
+    }
+    
+   # สร้าง response ในรูปแบบของ LINE Payload
+    response = {
+        "line_payload": [line_message],
+        "date": request.date,
+        "time_slot": request.time_slot,
+        "available_pairs": available_pairs
+    }
+    
+    print(response)
+    print(f"[LOG] API done in {timeTest.time() - start:.3f}s")
+    return JSONResponse(
+        content=response,
+        headers={"Response-Type": "object"}
+    )
 @app.get("/auth-redirect", response_class=HTMLResponse)
-async def auth_redirect(auth_url: str, email: str = None):
+async def auth_redirect(request: Request, auth_url: str, email: str = None):
     """หน้าเว็บที่แสดงปุ่มเข้าสู่ระบบ Google โดยไม่มีการ redirect อัตโนมัติ"""
     # ถอดรหัส URL ในกรณีที่มีการเข้ารหัสมา
     decoded_auth_url = unquote_plus(auth_url)
     
-    # สร้างหน้า HTML ที่แสดงคำแนะนำและปุ่มสำหรับเข้าสู่ระบบ
-    html_content = f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>เข้าสู่ระบบ Google Calendar</title>
-        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.6.0/dist/css/bootstrap.min.css">
-        <style>
-            body {{
-                font-family: 'Helvetica Neue', Arial, sans-serif;
-                background-color: #f8f9fa;
-                padding: 20px;
-            }}
-            .container {{
-                max-width: 600px;
-                margin: 30px auto;
-                background-color: white;
-                border-radius: 10px;
-                padding: 30px;
-                box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-                text-align: center;
-            }}
-            .google-icon {{
-                width: 50px;
-                height: 50px;
-                margin-bottom: 20px;
-            }}
-            .btn-google {{
-                background-color: #4285F4;
-                color: white;
-                border: none;
-                padding: 12px 24px;
-                font-size: 16px;
-                border-radius: 4px;
-                margin-top: 20px;
-                cursor: pointer;
-                display: inline-block;
-                text-decoration: none;
-                font-weight: bold;
-            }}
-            .btn-google:hover {{
-                background-color: #3367D6;
-            }}
-            .email-display {{
-                font-weight: bold;
-                color: #4285F4;
-            }}
-            .instructions {{
-                background-color: #fff3cd;
-                border: 1px solid #ffeeba;
-                border-radius: 6px;
-                padding: 15px;
-                margin: 20px 0;
-                text-align: left;
-            }}
-            .instructions h5 {{
-                color: #856404;
-                margin-bottom: 10px;
-            }}
-            .instructions li {{
-                margin-bottom: 8px;
-            }}
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <img src="https://upload.wikimedia.org/wikipedia/commons/5/53/Google_%22G%22_Logo.svg" alt="Google Logo" class="google-icon">
-            <h2 class="mb-4">เข้าสู่ระบบ Google Calendar</h2>
-            
-            {f'<p class="mb-3">สำหรับบัญชี: <span class="email-display">{email}</span></p>' if email else ''}
-            
-            <div class="instructions">
-                <h5>📱 คำแนะนำสำหรับผู้ใช้มือถือ:</h5>
-                <ol>
-                    <li>กรุณากดปุ่ม "..." หรือ "เพิ่มเติม" และเลือก <strong>"เปิดในเบราว์เซอร์"</strong> ก่อนกด "เข้าสู่ระบบกับ Google"</li>
-                    <li>เมื่อเปิดผ่านเว็บไซต์ภายนอกแล้ว กดปุ่ม <strong>"เข้าสู่ระบบกับ Google"</strong> ด้านล่าง</li>
-                    <li>ดำเนินการเข้าสู่ระบบในเบราว์เซอร์ที่เปิดขึ้น</li>
-                </ol>
-                <p class="mt-2 mb-1" style="color: #721c24;"><strong>⚠️ สำคัญ:</strong> ต้องเปิดในเบราว์เซอร์ภายนอกเท่านั้น เพื่อให้สามารถเข้าสู่ระบบได้</p>
-            </div>
-            
-            <a href="{decoded_auth_url}" class="btn-google" id="loginButton" target="_blank">
-                เข้าสู่ระบบกับ Google
-            </a>
-            
-            <p class="mt-3 text-muted">หลังจากเข้าสู่ระบบสำเร็จ คุณสามารถกลับไปที่แชทบอทเพื่อใช้งานต่อได้ทันที</p>
-        </div>
-    </body>
-    </html>
-    """
-    
-    return HTMLResponse(content=html_content)
+    # ส่งค่าตัวแปรไปยัง template
+    return templates.TemplateResponse(
+        "auth_redirect.html", 
+        {
+            "request": request,  # จำเป็นต้องส่งตัวแปร request ให้กับ Jinja2
+            "auth_url": decoded_auth_url,
+            "email": email
+        }
+    )
