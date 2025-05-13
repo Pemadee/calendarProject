@@ -1365,7 +1365,7 @@ def create_line_payload(messages):
         messages = [messages]
     
     return {"line_payload": messages}
-
+# API 1: ดึงวัน
 @app.post("/events/available-dates")
 def get_available_dates(request: ManagerRecruiter2):
     """
@@ -1582,7 +1582,6 @@ def get_available_dates(request: ManagerRecruiter2):
         content=response,
         headers={"Response-Type": "object"}
     )
-
 # API 2: ดึงช่วงเวลาและคู่ในวันที่เลือก
 @app.post("/events/available-timeslots")
 def get_available_timeslots(request: DateRequest):
@@ -1798,7 +1797,6 @@ def get_available_timeslots(request: DateRequest):
         content=response,
         headers={"Response-Type": "object"}
     )
-
 # API 3: ดึงรายละเอียดของคู่ที่ว่างในช่วงเวลาที่เลือก
 @app.post("/events/available-pairs")
 def get_available_pairs(request: TimeSlotRequest):
