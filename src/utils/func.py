@@ -18,11 +18,11 @@ import pandas as pd
 from email.mime.text import MIMEText
 from collections import defaultdict
 import threading
-from src.utils.token_db import *
-from src.models.token_model import SessionLocal
+from utils.token_db import *
+from models.token_model import SessionLocal
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request as GoogleRequest
-from src.config import CLIENT_ID, CLIENT_SECRET, SCOPES
+from config import CLIENT_ID, CLIENT_SECRET, SCOPES
 from datetime import datetime
 
 # Local application

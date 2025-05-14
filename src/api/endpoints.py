@@ -1,21 +1,16 @@
 # Standard library
-import asyncio
-import json
 import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import random
 import time as timeTest
-import ssl
 import sys
 from urllib.parse import quote_plus, unquote_plus
-import uuid
 # Third-party libraries
-import aiofiles
 from dotenv import load_dotenv
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request, logger
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -26,7 +21,6 @@ import logging
 from linebot import LineBotApi, WebhookHandler
 import time as timeTest
 import holidays
-from requests import Session
 
 # Local application
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
@@ -65,8 +59,6 @@ AUTH_PORT = 8080  # พอร์ต redirect
 FILE_PATH = os.path.join(os.path.dirname(__file__), '..', '..', os.getenv("FILE_PATH"))
 # ปอดการแจ้งเตือน INFO:googleapiclient.discovery_cache:file_cache is only supported with oauth2client<4.0.0
 logging.getLogger('googleapiclient.discovery_cache').setLevel(logging.ERROR)
-line_bot_api = LineBotApi(os.getenv("CHANNEL_ACCESS_TOKEN"))
-handler = WebhookHandler(os.getenv("CHANNEL_SECRET"))
 base_url = os.environ.get('BASE_URL')
 EMAIL_SENDER = os.getenv("EMAIL_to_SEND_MESSAGE")
 EMAIL_PASSWORD = os.getenv("PASSWORD_EMAIL")
@@ -87,19 +79,6 @@ async def catch_all(request: Request, call_next):
 @app.get("/")
 def read_root():
     return {"message": "ยินดีต้อนรับสู่ Google Calendar API"}
-
-@app.post("/webhook")
-async def webhook(request: Request):
-    signature = request.headers.get("X-Line-Signature", "")
-    body = await request.body()
-    body_decode = body.decode("utf-8")
-
-    try:
-        handler.handle(body_decode, signature)
-    except InvalidSignatureError:
-        raise HTTPException(status_code=400, detail="Invalid signature")
-
-    return JSONResponse(content={"status": "OK"})
 
 @app.get("/oauth2callback")
 def oauth2callback(code: str, state: str = None):
@@ -174,213 +153,6 @@ def oauth2callback(code: str, state: str = None):
             </body>
         </html>
         """, status_code=500)
-
-@app.get("/events/{user_email}")
-def get_user_events(
-    user_email: str, 
-    calendar_id: str = "primary",
-    start_date: Optional[str] = None, 
-    end_date: Optional[str] = None
-):
-    """ดึงข้อมูลกิจกรรมของผู้ใช้คนเดียว และยืนยันตัวตนหากจำเป็น"""
-    # ดึงข้อมูลและยืนยันตัวตนถ้าจำเป็น
-    creds_result = get_credentials(user_email)
-    
-    # ตรวจสอบว่าต้องการการยืนยันตัวตนหรือไม่
-    if isinstance(creds_result, dict) and creds_result.get("requires_auth"):
-        auth_url = creds_result["auth_url"]
-        
-        # เข้ารหัส auth_url และ email เพื่อส่งเป็นพารามิเตอร์
-        encoded_auth_url = quote_plus(auth_url)
-        encoded_email = quote_plus(user_email)
-        
-        # สร้าง URL ไปยังหน้า redirect ของเรา
-        redirect_page_url = f"{base_url}/auth-redirect?auth_url={encoded_auth_url}&email={encoded_email}"
-        
-        line_flex_message = {
-            "type": "flex",
-            "altText": "กรุณาเข้าสู่ระบบ Google Calendar",
-            "contents": {
-                "type": "bubble",
-                "size": "mega",
-                "body": {
-                    "type": "box",
-                    "layout": "vertical",
-                    "spacing": "md",
-                    "contents": [
-                        {
-                            "type": "box",
-                            "layout": "vertical",
-                            "contents": [
-                                {
-                                    "type": "text",
-                                    "text": "เข้าสู่ระบบ Google Calendar",
-                                    "weight": "bold",
-                                    "size": "xl",
-                                    "color": "#4285F4",
-                                    "align": "center",       # จัดกลาง
-                                    "gravity": "center",     # จัดให้อยู่ตรงกลางแนวตั้ง
-                                    "wrap": True
-                                }
-                            ]
-                        },
-                        {
-                            "type": "box",
-                            "layout": "vertical",
-                            "spacing": "sm",
-                            "contents": [
-                                {
-                                    "type": "text",
-                                    "text": "อีเมล:",
-                                    "size": "sm",
-                                    "color": "#999999"
-                                },
-                                {
-                                    "type": "text",
-                                    "text": user_email,
-                                    "size": "md",
-                                    "weight": "bold",
-                                    "wrap": True
-                                }
-                            ]
-                        }
-                    ]
-                },
-                "footer": {
-                    "type": "box",
-                    "layout": "vertical",
-                    "contents": [
-                        {
-                            "type": "button",
-                            "action": {
-                                "type": "uri",
-                                "label": "🔗เข้าสู่ระบบกับ Google",
-                                "uri": redirect_page_url
-                            },
-                            "style": "primary",
-                            "color": "#4285F4"
-                        }
-                    ]
-                }
-            }
-        }
-
-
-        
-        # สร้าง response object พร้อม header ที่ระบุว่าเป็น JSON
-        response_data = {
-            "email": user_email,
-            "is_authenticated": False,
-            "auth_required": True,
-            "auth_url": auth_url,
-            "redirect_url": redirect_page_url,
-            "line_payload": [line_flex_message]
-        }
-        
-        return JSONResponse(
-            content=response_data,
-            headers={"Response-Type": "object"}
-        )
-    
-    # ถ้ามี credentials แล้ว ส่งข้อความว่าผู้ใช้เข้าสู่ระบบแล้ว
-    try:
-        # สร้าง LINE Flex Message แจ้งว่าได้เข้าสู่ระบบแล้ว
-        already_login_message = {
-            "type": "flex",
-            "altText": "คุณได้ทำการเข้าสู่ระบบแล้ว✅",
-            "contents": {
-                "type": "bubble",
-                "body": {
-                    "type": "box",
-                    "layout": "vertical",
-                    "contents": [
-                        {
-                            "type": "text",
-                            "text": "คุณได้ทำการเข้าสู่ระบบแล้ว✅",
-                            "weight": "bold",
-                            "size": "lg",
-                            "color": "#28a745",
-                            "align": "center"
-                        },
-                        {
-                            "type": "text",
-                            "text": f"อีเมล: {user_email}",
-                            "margin": "md",
-                            "align": "center"
-                        }
-                    ]
-                }
-            }
-        }
-        
-        response_data = {
-            'email': user_email,
-            'is_authenticated': True,
-            'message': "คุณได้ทำการเข้าสู่ระบบแล้ว✅",
-            'line_payload': [already_login_message]
-        }
-        
-        return JSONResponse(
-            content=response_data,
-            headers={"Response-Type": "object"}
-        )
-    except Exception as e:
-        print(f"เกิดข้อผิดพลาดสำหรับ {user_email}: {str(e)}")
-        
-        # สร้าง LINE Flex Message สำหรับแสดงข้อผิดพลาด
-        error_flex_message = {
-            "type": "flex",
-            "altText": "เกิดข้อผิดพลาด",
-            "contents": {
-                "type": "bubble",
-                "body": {
-                    "type": "box",
-                    "layout": "vertical",
-                    "contents": [
-                        {
-                            "type": "text",
-                            "text": "เกิดข้อผิดพลาด",
-                            "weight": "bold",
-                            "size": "xl",
-                            "color": "#d9534f"
-                        },
-                        {
-                            "type": "text",
-                            "text": str(e),
-                            "wrap": True,
-                            "margin": "md"
-                        }
-                    ]
-                },
-                "footer": {
-                    "type": "box",
-                    "layout": "vertical",
-                    "contents": [
-                        {
-                            "type": "button",
-                            "action": {
-                                "type": "message",
-                                "label": "ลองใหม่",
-                                "text": f"login {user_email}"
-                            },
-                            "style": "primary"
-                        }
-                    ]
-                }
-            }
-        }
-        
-        error_response = {
-            'email': user_email,
-            'error': str(e),
-            'is_authenticated': False,
-            'line_payload': [error_flex_message]
-        }
-        print(error_response)
-        return JSONResponse(
-            content=error_response,
-            headers={"Response-Type": "object"}
-        )
 
 @app.post("/events/multiple")
 def get_multiple_users_events(request: UsersRequest):
@@ -708,262 +480,6 @@ def get_multiple_users_events(request: ManagerRecruiter):
     
     return JSONResponse(content=response)
   
-@app.post("/events/create-bulk")
-def create_bulk_events(event_request: BulkEventRequest):
-    """สร้างการนัดหมายโดยใช้ name1 เป็น organizer และเพิ่ม name2 เป็นผู้เข้าร่วม"""
-    start = timeTest.time()
-    try:
-        # แปลงเวลาให้เป็นรูปแบบ ISO
-        try:
-            start_time, end_time = convert_to_iso_format(event_request.date, event_request.time)
-        except ValueError as e:
-            return JSONResponse(
-                content={
-                    "message": "รูปแบบวันที่หรือเวลาไม่ถูกต้อง",
-                    "error": str(e),
-                    "line_payload": [{
-                        "type": "text",
-                        "text": f"รูปแบบวันที่หรือเวลาไม่ถูกต้อง: {str(e)}"
-                    }]
-                },
-                headers={"Response-Type": "object"}
-            )
-        
-        # ค้นหาอีเมลจากชื่อและพื้นที่
-        email_info = find_emails_from_name_pair(event_request.name_pair, event_request.location)
-        
-        # เข้าถึงข้อมูลโดยตรงจาก dict
-        name1_email = email_info["name1_email"]
-        name1 = email_info["name1"]
-        name2_email = email_info["name2_email"]
-        name2 = email_info["name2"]
-        
-        # ตรวจสอบว่าผู้ใช้ทั้งสองคนได้ยืนยันตัวตนแล้วหรือไม่
-        invalid_users = []
-        if not is_token_valid(name1_email):
-            invalid_users.append(name1_email)
-        if not is_token_valid(name2_email):
-            invalid_users.append(name2_email)
-                
-        if invalid_users:
-            # สร้าง Line Response สำหรับกรณีที่มีผู้ใช้ยังไม่ได้ยืนยันตัวตน
-            line_response = {
-                "type": "text",
-                "text": "ไม่สามารถสร้างการนัดหมายได้ เนื่องจากมีผู้ใช้บางคนยังไม่ได้ยืนยันตัวตน"
-            }
-            
-            return JSONResponse(
-                content={
-                    "message": "ผู้ใช้บางคนยังไม่ได้ยืนยันตัวตน",
-                    "invalid_users": invalid_users,
-                    "line_payload": [line_response]
-                },
-                headers={"Response-Type": "object"}
-            )
-            
-        # รับ credentials ของ name1
-        token_entry1 = get_token(name1_email)
-        creds1 = Credentials(
-            token=token_entry1.access_token,
-            refresh_token=token_entry1.refresh_token,
-            token_uri="https://oauth2.googleapis.com/token",
-            client_id=CLIENT_ID,
-            client_secret=CLIENT_SECRET,
-            scopes=SCOPES
-        )
-        
-        # สร้าง service สำหรับ name1
-        service1 = build('calendar', 'v3', credentials=creds1)
-        
-        # ตรวจสอบว่ามีกิจกรรมซ้ำซ้อนในช่วงเวลาเดียวกันหรือไม่
-        time_min = start_time
-        time_max = end_time
-        
-        # ตรวจสอบปฏิทินของ name1
-        events_result1 = service1.events().list(
-            calendarId='primary',
-            timeMin=time_min,
-            timeMax=time_max,
-            singleEvents=True,
-            orderBy='startTime'
-        ).execute()
-        events1 = events_result1.get('items', [])
-        
-        # ตรวจสอบปฏิทินของ name2
-        if is_token_valid(name2_email):
-            token_entry2 = get_token(name2_email)
-            creds2 = Credentials(
-                token=token_entry2.access_token,
-                refresh_token=token_entry2.refresh_token,
-                token_uri="https://oauth2.googleapis.com/token",
-                client_id=CLIENT_ID,
-                client_secret=CLIENT_SECRET,
-                scopes=SCOPES
-            )
-            service2 = build('calendar', 'v3', credentials=creds2)
-            events_result2 = service2.events().list(
-                calendarId='primary',
-                timeMin=time_min,
-                timeMax=time_max,
-                singleEvents=True,
-                orderBy='startTime'
-            ).execute()
-            events2 = events_result2.get('items', [])
-        else:
-            events2 = []
-        
-        # ถ้ามีกิจกรรมในช่วงเวลาเดียวกัน ให้แจ้งเตือนและยกเลิกการสร้างนัดหมาย
-        if events1 or events2:
-            conflict_events = []
-            
-            # รวบรวมรายการกิจกรรมที่ซ้ำซ้อน
-            for event in events1:
-                conflict_events.append({
-                    'title': event.get('summary', 'ไม่มีชื่อ'),
-                    'start': event.get('start', {}).get('dateTime', ''),
-                    'end': event.get('end', {}).get('dateTime', ''),
-                    'calendar_owner': name1
-                })
-            
-            for event in events2:
-                conflict_events.append({
-                    'title': event.get('summary', 'ไม่มีชื่อ'),
-                    'start': event.get('start', {}).get('dateTime', ''),
-                    'end': event.get('end', {}).get('dateTime', ''),
-                    'calendar_owner': name2
-                })
-            
-            # สร้าง Line Response สำหรับกรณีที่มีกิจกรรมซ้ำซ้อน
-            line_response = {
-                "type": "text",
-                "text": f"ขออภัย ไม่สามารถทำการสร้างนัดได้เนื่องจากมีกิจกรรมอยู่แล้ว"
-            }
-            
-            return JSONResponse(
-                content={
-                    "message": "มีกิจกรรมซ้ำซ้อนในช่วงเวลาเดียวกัน",
-                    "conflict_events": conflict_events,
-                    "line_payload": [line_response]
-                },
-                headers={"Response-Type": "object"}
-            )
-        
-        # เตรียมรายชื่อผู้เข้าร่วมเพิ่มเติม
-        additional_attendees = []
-        if event_request.attendees:
-            additional_attendees = [{'email': email} for email in event_request.attendees]
-        
-        # กำหนดชื่อหัวข้อตามรูปแบบที่ต้องการ
-        event_summary = f"Onsite Interview : K. {name2} - {event_request.location}"
-        
-        # เตรียมข้อมูลกิจกรรม
-        event_data = {
-            'summary': event_summary,
-            'location': event_request.event_location,
-            'start': {
-                'dateTime': start_time,
-                'timeZone': 'Asia/Bangkok',
-            },
-            'end': {
-                'dateTime': end_time,
-                'timeZone': 'Asia/Bangkok',
-            },
-            'reminders': {
-                'useDefault': False,
-                'overrides': [
-                    {'method': 'popup', 'minutes': 10}  # แจ้งเตือน 10 นาทีก่อนการประชุม
-                ]
-            },
-            'guestsCanSeeOtherGuests': True,  # ให้ผู้เข้าร่วมเห็นกันและกันได้
-            'guestsCanModify': False,  # ให้ผู้เข้าร่วมสามารถแก้ไขรายละเอียดได้
-            'sendUpdates': 'all'  # ส่งอีเมลแจ้งเตือนถึงผู้เข้าร่วมทุกคน
-        }
-        
-        # ผลลัพธ์การดำเนินการ
-        results = []
-        
-        # สร้างการนัดหมายเพียงครั้งเดียวโดยใช้ name1 เป็น organizer
-        try:
-            # เพิ่มทั้ง name1 และ name2 เป็นผู้เข้าร่วม (แม้ว่า name1 จะเป็น organizer)
-            # ซึ่งจะช่วยให้แสดงรายชื่อในส่วนของผู้เข้าร่วมอย่างชัดเจน
-            attendees = [
-                {'email': name1_email, 'responseStatus': 'accepted', 'organizer': True},
-                {'email': name2_email}
-            ] + additional_attendees
-            event_data['attendees'] = attendees
-            
-            # สร้างกิจกรรมในปฏิทินของ name1
-            created_event = service1.events().insert(
-                calendarId="primary",
-                body=event_data
-            ).execute()
-            
-            results.append({
-                'email': name1_email,
-                'success': True,
-                'message': f'สร้างการนัดหมายสำเร็จ มี {name2} เป็นผู้เข้าร่วม',
-                'event_id': created_event['id'],
-                'html_link': created_event['htmlLink']
-            })
-            
-        except Exception as e:
-            print(f"เกิดข้อผิดพลาดในการสร้างการนัดหมาย: {str(e)}")
-            results.append({
-                'email': name1_email,
-                'success': False,
-                'message': f'เกิดข้อผิดพลาด: {str(e)}'
-            })
-            
-            # สร้าง Line Response สำหรับกรณีเกิดข้อผิดพลาด
-            line_response = {
-                "type": "text",
-                "text": f"เกิดข้อผิดพลาดในการสร้างการนัดหมาย: {str(e)}"
-            }
-            
-            print(f"[DEBUG] API done at {timeTest.time() - start:.3f}s")
-            return JSONResponse(
-                content={
-                    "message": "เกิดข้อผิดพลาดในการสร้างการนัดหมาย",
-                    "error": str(e),
-                    "line_payload": [line_response]
-                },
-                headers={"Response-Type": "object"}
-            )
-        
-        # สร้าง Line Response แบบ text ธรรมดา
-        line_response = {
-            "type": "text",
-            "text": f"นัดใน Google Calendar เรียบร้อยแล้ว สำหรับ {name1} และ {name2} ในหัวข้อ \"{event_summary}\" วันที่ {event_request.date} เวลา {event_request.time}"
-        }
-        
-        # คืนค่าข้อมูลพร้อมกับ Line Response Object
-        print(f"[DEBUG] API done at {timeTest.time() - start:.3f}s")
-        return JSONResponse(
-            content={
-                "message": f"ดำเนินการสร้างการนัดหมายสำหรับ {name1_email} และ {name2_email}",
-                "results": results,
-                "line_payload": [line_response]
-            },
-            headers={"Response-Type": "object"}
-        )
-            
-    except Exception as e:
-        # สร้าง Line Response สำหรับกรณีเกิดข้อผิดพลาด
-        line_response = {
-            "type": "text",
-            "text": f"เกิดข้อผิดพลาดในการสร้างการนัดหมาย: {str(e)}"
-        }
-        
-        print(f"[DEBUG] API done at {timeTest.time() - start:.3f}s")
-        return JSONResponse(
-            content={
-                "message": "เกิดข้อผิดพลาดในการสร้างการนัดหมาย",
-                "error": str(e),
-                "line_payload": [line_response]
-            },
-            headers={"Response-Type": "object"}
-        )
-
 @app.post("/getManagerRecruiter")
 def get_multiple_users_events(body: getManagerRecruiter):
     try:
@@ -1368,18 +884,7 @@ def get_available_time_slots(request: ManagerRecruiter):
     
     return JSONResponse(content=response)
 
-@app.get("/test/auto-refresh")
-def trigger_auto_refresh():
-    """เรียกใช้ auto_refresh_tokens เพื่อทดสอบทันที"""
-    from src.utils.auto_refresh_jobs import auto_refresh_tokens
-    
-    try:
-        # เรียกใช้ฟังก์ชันโดยตรง
-        auto_refresh_tokens()
-        return {"status": "success", "message": "Auto refresh tokens triggered successfully"}
-    except Exception as e:
-        return {"status": "error", "message": f"Error triggering auto refresh: {str(e)}"}
-
+#================================================API appointment =============================================
 # API 1: ดึงวัน
 @app.post("/events/available-dates")
 def get_available_dates(request: ManagerRecruiter2):
@@ -2012,8 +1517,471 @@ def get_available_pairs(request: TimeSlotRequest):
         content=response,
         headers={"Response-Type": "object"}
     )
+#book calendar
+@app.post("/events/create-bulk")
+def create_bulk_events(event_request: BulkEventRequest):
+    """สร้างการนัดหมายโดยใช้ name1 เป็น organizer และเพิ่ม name2 เป็นผู้เข้าร่วม"""
+    start = timeTest.time()
+    try:
+        # แปลงเวลาให้เป็นรูปแบบ ISO
+        try:
+            start_time, end_time = convert_to_iso_format(event_request.date, event_request.time)
+        except ValueError as e:
+            return JSONResponse(
+                content={
+                    "message": "รูปแบบวันที่หรือเวลาไม่ถูกต้อง",
+                    "error": str(e),
+                    "line_payload": [{
+                        "type": "text",
+                        "text": f"รูปแบบวันที่หรือเวลาไม่ถูกต้อง: {str(e)}"
+                    }]
+                },
+                headers={"Response-Type": "object"}
+            )
+        
+        # ค้นหาอีเมลจากชื่อและพื้นที่
+        email_info = find_emails_from_name_pair(event_request.name_pair, event_request.location)
+        
+        # เข้าถึงข้อมูลโดยตรงจาก dict
+        name1_email = email_info["name1_email"]
+        name1 = email_info["name1"]
+        name2_email = email_info["name2_email"]
+        name2 = email_info["name2"]
+        
+        # ตรวจสอบว่าผู้ใช้ทั้งสองคนได้ยืนยันตัวตนแล้วหรือไม่
+        invalid_users = []
+        if not is_token_valid(name1_email):
+            invalid_users.append(name1_email)
+        if not is_token_valid(name2_email):
+            invalid_users.append(name2_email)
+                
+        if invalid_users:
+            # สร้าง Line Response สำหรับกรณีที่มีผู้ใช้ยังไม่ได้ยืนยันตัวตน
+            line_response = {
+                "type": "text",
+                "text": "ไม่สามารถสร้างการนัดหมายได้ เนื่องจากมีผู้ใช้บางคนยังไม่ได้ยืนยันตัวตน"
+            }
+            
+            return JSONResponse(
+                content={
+                    "message": "ผู้ใช้บางคนยังไม่ได้ยืนยันตัวตน",
+                    "invalid_users": invalid_users,
+                    "line_payload": [line_response]
+                },
+                headers={"Response-Type": "object"}
+            )
+            
+        # รับ credentials ของ name1
+        token_entry1 = get_token(name1_email)
+        creds1 = Credentials(
+            token=token_entry1.access_token,
+            refresh_token=token_entry1.refresh_token,
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=CLIENT_ID,
+            client_secret=CLIENT_SECRET,
+            scopes=SCOPES
+        )
+        
+        # สร้าง service สำหรับ name1
+        service1 = build('calendar', 'v3', credentials=creds1)
+        
+        # ตรวจสอบว่ามีกิจกรรมซ้ำซ้อนในช่วงเวลาเดียวกันหรือไม่
+        time_min = start_time
+        time_max = end_time
+        
+        # ตรวจสอบปฏิทินของ name1
+        events_result1 = service1.events().list(
+            calendarId='primary',
+            timeMin=time_min,
+            timeMax=time_max,
+            singleEvents=True,
+            orderBy='startTime'
+        ).execute()
+        events1 = events_result1.get('items', [])
+        
+        # ตรวจสอบปฏิทินของ name2
+        if is_token_valid(name2_email):
+            token_entry2 = get_token(name2_email)
+            creds2 = Credentials(
+                token=token_entry2.access_token,
+                refresh_token=token_entry2.refresh_token,
+                token_uri="https://oauth2.googleapis.com/token",
+                client_id=CLIENT_ID,
+                client_secret=CLIENT_SECRET,
+                scopes=SCOPES
+            )
+            service2 = build('calendar', 'v3', credentials=creds2)
+            events_result2 = service2.events().list(
+                calendarId='primary',
+                timeMin=time_min,
+                timeMax=time_max,
+                singleEvents=True,
+                orderBy='startTime'
+            ).execute()
+            events2 = events_result2.get('items', [])
+        else:
+            events2 = []
+        
+        # ถ้ามีกิจกรรมในช่วงเวลาเดียวกัน ให้แจ้งเตือนและยกเลิกการสร้างนัดหมาย
+        if events1 or events2:
+            conflict_events = []
+            
+            # รวบรวมรายการกิจกรรมที่ซ้ำซ้อน
+            for event in events1:
+                conflict_events.append({
+                    'title': event.get('summary', 'ไม่มีชื่อ'),
+                    'start': event.get('start', {}).get('dateTime', ''),
+                    'end': event.get('end', {}).get('dateTime', ''),
+                    'calendar_owner': name1
+                })
+            
+            for event in events2:
+                conflict_events.append({
+                    'title': event.get('summary', 'ไม่มีชื่อ'),
+                    'start': event.get('start', {}).get('dateTime', ''),
+                    'end': event.get('end', {}).get('dateTime', ''),
+                    'calendar_owner': name2
+                })
+            
+            # สร้าง Line Response สำหรับกรณีที่มีกิจกรรมซ้ำซ้อน
+            line_response = {
+                "type": "text",
+                "text": f"ขออภัย ไม่สามารถทำการสร้างนัดได้เนื่องจากมีกิจกรรมอยู่แล้ว"
+            }
+            
+            return JSONResponse(
+                content={
+                    "message": "มีกิจกรรมซ้ำซ้อนในช่วงเวลาเดียวกัน",
+                    "conflict_events": conflict_events,
+                    "line_payload": [line_response]
+                },
+                headers={"Response-Type": "object"}
+            )
+        
+        # เตรียมรายชื่อผู้เข้าร่วมเพิ่มเติม
+        additional_attendees = []
+        if event_request.attendees:
+            additional_attendees = [{'email': email} for email in event_request.attendees]
+        
+        # กำหนดชื่อหัวข้อตามรูปแบบที่ต้องการ
+        event_summary = f"Onsite Interview : K. {name2} - {event_request.location}"
+        
+        # เตรียมข้อมูลกิจกรรม
+        event_data = {
+            'summary': event_summary,
+            'location': event_request.event_location,
+            'start': {
+                'dateTime': start_time,
+                'timeZone': 'Asia/Bangkok',
+            },
+            'end': {
+                'dateTime': end_time,
+                'timeZone': 'Asia/Bangkok',
+            },
+            'reminders': {
+                'useDefault': False,
+                'overrides': [
+                    {'method': 'popup', 'minutes': 10}  # แจ้งเตือน 10 นาทีก่อนการประชุม
+                ]
+            },
+            'guestsCanSeeOtherGuests': True,  # ให้ผู้เข้าร่วมเห็นกันและกันได้
+            'guestsCanModify': False,  # ให้ผู้เข้าร่วมสามารถแก้ไขรายละเอียดได้
+            'sendUpdates': 'all'  # ส่งอีเมลแจ้งเตือนถึงผู้เข้าร่วมทุกคน
+        }
+        
+        # ผลลัพธ์การดำเนินการ
+        results = []
+        
+        # สร้างการนัดหมายเพียงครั้งเดียวโดยใช้ name1 เป็น organizer
+        try:
+            # เพิ่มทั้ง name1 และ name2 เป็นผู้เข้าร่วม (แม้ว่า name1 จะเป็น organizer)
+            # ซึ่งจะช่วยให้แสดงรายชื่อในส่วนของผู้เข้าร่วมอย่างชัดเจน
+            attendees = [
+                {'email': name1_email, 'responseStatus': 'accepted', 'organizer': True},
+                {'email': name2_email}
+            ] + additional_attendees
+            event_data['attendees'] = attendees
+            
+            # สร้างกิจกรรมในปฏิทินของ name1
+            created_event = service1.events().insert(
+                calendarId="primary",
+                body=event_data
+            ).execute()
+            
+            results.append({
+                'email': name1_email,
+                'success': True,
+                'message': f'สร้างการนัดหมายสำเร็จ มี {name2} เป็นผู้เข้าร่วม',
+                'event_id': created_event['id'],
+                'html_link': created_event['htmlLink']
+            })
+            
+        except Exception as e:
+            print(f"เกิดข้อผิดพลาดในการสร้างการนัดหมาย: {str(e)}")
+            results.append({
+                'email': name1_email,
+                'success': False,
+                'message': f'เกิดข้อผิดพลาด: {str(e)}'
+            })
+            
+            # สร้าง Line Response สำหรับกรณีเกิดข้อผิดพลาด
+            line_response = {
+                "type": "text",
+                "text": f"เกิดข้อผิดพลาดในการสร้างการนัดหมาย: {str(e)}"
+            }
+            
+            print(f"[DEBUG] API done at {timeTest.time() - start:.3f}s")
+            return JSONResponse(
+                content={
+                    "message": "เกิดข้อผิดพลาดในการสร้างการนัดหมาย",
+                    "error": str(e),
+                    "line_payload": [line_response]
+                },
+                headers={"Response-Type": "object"}
+            )
+        
+        # สร้าง Line Response แบบ text ธรรมดา
+        line_response = {
+            "type": "text",
+            "text": f"นัดใน Google Calendar เรียบร้อยแล้ว สำหรับ {name1} และ {name2} ในหัวข้อ \"{event_summary}\" วันที่ {event_request.date} เวลา {event_request.time}"
+        }
+        
+        # คืนค่าข้อมูลพร้อมกับ Line Response Object
+        print(f"[DEBUG] API done at {timeTest.time() - start:.3f}s")
+        return JSONResponse(
+            content={
+                "message": f"ดำเนินการสร้างการนัดหมายสำหรับ {name1_email} และ {name2_email}",
+                "results": results,
+                "line_payload": [line_response]
+            },
+            headers={"Response-Type": "object"}
+        )
+            
+    except Exception as e:
+        # สร้าง Line Response สำหรับกรณีเกิดข้อผิดพลาด
+        line_response = {
+            "type": "text",
+            "text": f"เกิดข้อผิดพลาดในการสร้างการนัดหมาย: {str(e)}"
+        }
+        
+        print(f"[DEBUG] API done at {timeTest.time() - start:.3f}s")
+        return JSONResponse(
+            content={
+                "message": "เกิดข้อผิดพลาดในการสร้างการนัดหมาย",
+                "error": str(e),
+                "line_payload": [line_response]
+            },
+            headers={"Response-Type": "object"}
+        )
+#login
+@app.get("/events/{user_email}")
+def get_user_events(
+    user_email: str, 
+    calendar_id: str = "primary",
+    start_date: Optional[str] = None, 
+    end_date: Optional[str] = None
+):
+    """ดึงข้อมูลกิจกรรมของผู้ใช้คนเดียว และยืนยันตัวตนหากจำเป็น"""
+    # ดึงข้อมูลและยืนยันตัวตนถ้าจำเป็น
+    creds_result = get_credentials(user_email)
+    
+    # ตรวจสอบว่าต้องการการยืนยันตัวตนหรือไม่
+    if isinstance(creds_result, dict) and creds_result.get("requires_auth"):
+        auth_url = creds_result["auth_url"]
+        
+        # เข้ารหัส auth_url และ email เพื่อส่งเป็นพารามิเตอร์
+        encoded_auth_url = quote_plus(auth_url)
+        encoded_email = quote_plus(user_email)
+        
+        # สร้าง URL ไปยังหน้า redirect ของเรา
+        redirect_page_url = f"{base_url}/auth-redirect?auth_url={encoded_auth_url}&email={encoded_email}"
+        
+        line_flex_message = {
+            "type": "flex",
+            "altText": "กรุณาเข้าสู่ระบบ Google Calendar",
+            "contents": {
+                "type": "bubble",
+                "size": "mega",
+                "body": {
+                    "type": "box",
+                    "layout": "vertical",
+                    "spacing": "md",
+                    "contents": [
+                        {
+                            "type": "box",
+                            "layout": "vertical",
+                            "contents": [
+                                {
+                                    "type": "text",
+                                    "text": "เข้าสู่ระบบ Google Calendar",
+                                    "weight": "bold",
+                                    "size": "xl",
+                                    "color": "#4285F4",
+                                    "align": "center",       # จัดกลาง
+                                    "gravity": "center",     # จัดให้อยู่ตรงกลางแนวตั้ง
+                                    "wrap": True
+                                }
+                            ]
+                        },
+                        {
+                            "type": "box",
+                            "layout": "vertical",
+                            "spacing": "sm",
+                            "contents": [
+                                {
+                                    "type": "text",
+                                    "text": "อีเมล:",
+                                    "size": "sm",
+                                    "color": "#999999"
+                                },
+                                {
+                                    "type": "text",
+                                    "text": user_email,
+                                    "size": "md",
+                                    "weight": "bold",
+                                    "wrap": True
+                                }
+                            ]
+                        }
+                    ]
+                },
+                "footer": {
+                    "type": "box",
+                    "layout": "vertical",
+                    "contents": [
+                        {
+                            "type": "button",
+                            "action": {
+                                "type": "uri",
+                                "label": "🔗เข้าสู่ระบบกับ Google",
+                                "uri": redirect_page_url
+                            },
+                            "style": "primary",
+                            "color": "#4285F4"
+                        }
+                    ]
+                }
+            }
+        }
 
-# =============================================================================================
+
+        
+        # สร้าง response object พร้อม header ที่ระบุว่าเป็น JSON
+        response_data = {
+            "email": user_email,
+            "is_authenticated": False,
+            "auth_required": True,
+            "auth_url": auth_url,
+            "redirect_url": redirect_page_url,
+            "line_payload": [line_flex_message]
+        }
+        
+        return JSONResponse(
+            content=response_data,
+            headers={"Response-Type": "object"}
+        )
+    
+    # ถ้ามี credentials แล้ว ส่งข้อความว่าผู้ใช้เข้าสู่ระบบแล้ว
+    try:
+        # สร้าง LINE Flex Message แจ้งว่าได้เข้าสู่ระบบแล้ว
+        already_login_message = {
+            "type": "flex",
+            "altText": "คุณได้ทำการเข้าสู่ระบบแล้ว✅",
+            "contents": {
+                "type": "bubble",
+                "body": {
+                    "type": "box",
+                    "layout": "vertical",
+                    "contents": [
+                        {
+                            "type": "text",
+                            "text": "คุณได้ทำการเข้าสู่ระบบแล้ว✅",
+                            "weight": "bold",
+                            "size": "lg",
+                            "color": "#28a745",
+                            "align": "center"
+                        },
+                        {
+                            "type": "text",
+                            "text": f"อีเมล: {user_email}",
+                            "margin": "md",
+                            "align": "center"
+                        }
+                    ]
+                }
+            }
+        }
+        
+        response_data = {
+            'email': user_email,
+            'is_authenticated': True,
+            'message': "คุณได้ทำการเข้าสู่ระบบแล้ว✅",
+            'line_payload': [already_login_message]
+        }
+        
+        return JSONResponse(
+            content=response_data,
+            headers={"Response-Type": "object"}
+        )
+    except Exception as e:
+        print(f"เกิดข้อผิดพลาดสำหรับ {user_email}: {str(e)}")
+        
+        # สร้าง LINE Flex Message สำหรับแสดงข้อผิดพลาด
+        error_flex_message = {
+            "type": "flex",
+            "altText": "เกิดข้อผิดพลาด",
+            "contents": {
+                "type": "bubble",
+                "body": {
+                    "type": "box",
+                    "layout": "vertical",
+                    "contents": [
+                        {
+                            "type": "text",
+                            "text": "เกิดข้อผิดพลาด",
+                            "weight": "bold",
+                            "size": "xl",
+                            "color": "#d9534f"
+                        },
+                        {
+                            "type": "text",
+                            "text": str(e),
+                            "wrap": True,
+                            "margin": "md"
+                        }
+                    ]
+                },
+                "footer": {
+                    "type": "box",
+                    "layout": "vertical",
+                    "contents": [
+                        {
+                            "type": "button",
+                            "action": {
+                                "type": "message",
+                                "label": "ลองใหม่",
+                                "text": f"login {user_email}"
+                            },
+                            "style": "primary"
+                        }
+                    ]
+                }
+            }
+        }
+        
+        error_response = {
+            'email': user_email,
+            'error': str(e),
+            'is_authenticated': False,
+            'line_payload': [error_flex_message]
+        }
+        print(error_response)
+        return JSONResponse(
+            content=error_response,
+            headers={"Response-Type": "object"}
+        )
+
+# =========================================================================================================
 
 
 

@@ -16,7 +16,7 @@ class UsersRequest(BaseModel):
     start_time: Optional[str] = None  # เช่น "18:30:00"
     end_time: Optional[str] = None    # เช่น "19:00:00"
 
-# ปรับโมเดลใหม่ให้รับข้อมูลในรูปแบบที่เข้าใจง่าย
+
 class BulkEventRequest(BaseModel):
     name_pair: str  # รับในรูปแบบ "name1-name2"
     location: str   # เช่น "Silom", "Asoke" เป็นต้น
@@ -25,7 +25,7 @@ class BulkEventRequest(BaseModel):
     time: str       # รูปแบบ "HH:MM-HH:MM" เช่น "09:30-10:00"
     attendees: Optional[List[str]] = None  # รายชื่ออีเมลของผู้เข้าร่วมเพิ่มเติม
 
-# โมเดลสำหรับรับข้อมูลผู้ใช้หลายคน จากข้อมูลใน excel
+
 class ManagerRecruiter(BaseModel):
     file_path: Optional[str] = None
     location: str

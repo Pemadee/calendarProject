@@ -1,4 +1,4 @@
-from src.models.token_model import SessionLocal, Token
+from models.token_model import SessionLocal, Token
 from datetime import datetime
 
 def get_token(email):
