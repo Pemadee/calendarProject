@@ -4,6 +4,7 @@ import json
 import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+import random
 import time as timeTest
 import ssl
 import sys
@@ -20,11 +21,12 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from linebot.exceptions import InvalidSignatureError
-from typing import Optional
+from typing import Dict, Optional
 import logging
 from linebot import LineBotApi, WebhookHandler
 import time as timeTest
 import holidays
+from requests import Session
 
 # Local application
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
@@ -70,6 +72,17 @@ EMAIL_SENDER = os.getenv("EMAIL_to_SEND_MESSAGE")
 EMAIL_PASSWORD = os.getenv("PASSWORD_EMAIL")
 CLIENT_SECRET_FILE = os.getenv("CLIENT_SECRET_FILE")
 logger = logging.getLogger(__name__)
+
+
+@app.middleware("http")
+async def catch_all(request: Request, call_next):
+    response = await call_next(request)
+    if response.status_code == 404:
+        return JSONResponse(
+            status_code=404,
+            content={"error": "Path not found", "path": str(request.url)}
+        )
+    return response
 
 @app.get("/")
 def read_root():
@@ -1367,14 +1380,6 @@ def trigger_auto_refresh():
     except Exception as e:
         return {"status": "error", "message": f"Error triggering auto refresh: {str(e)}"}
 
-def create_line_payload(messages):
-    """
-    แปลงข้อความเป็นรูปแบบ LINE Payload
-    """
-    if not isinstance(messages, list):
-        messages = [messages]
-    
-    return {"line_payload": messages}
 # API 1: ดึงวัน
 @app.post("/events/available-dates")
 def get_available_dates(request: ManagerRecruiter2):
@@ -2045,7 +2050,8 @@ async def read_token(email: str):
         raise HTTPException(status_code=404, detail=f"ไม่พบข้อมูลสำหรับ email: {email}")
     return token
 
-@app.get("/api/emails", response_model=List[EmailResponse])
+# @app.get("/api/emails", response_model=List[EmailResponse])
+@app.get("/api/emails", response_model=Dict[str, List[str]])
 async def read_all_emails():
     """
     API endpoint สำหรับดึงเฉพาะ email ทั้งหมด
@@ -2053,7 +2059,8 @@ async def read_all_emails():
     emails = get_all_emails()
     if not emails:
         return []
-    return emails
+    # return emails
+    return {"email": emails}
 
 @app.delete("/api/revoke/{user_email}")
 def revoke_auth(user_email: str):
@@ -2081,6 +2088,37 @@ def revoke_auth(user_email: str):
             "message": f"เกิดข้อผิดพลาดในการยกเลิกการยืนยันตัวตน: {str(e)}"
         }
  
+@app.post("/api/mock-add-tokens")
+def mock_add_tokens():
+    """
+    สร้างข้อมูลทดสอบ token สำหรับ email จำนวน 50 รายการ
+    """
+    db = SessionLocal()
+    try:
+        for i in range(1, 51):
+            email = f"user{i:02d}@example.com"
+            access_token = f"access_token_{i}"
+            refresh_token = f"refresh_token_{i}"
+            expiry = datetime.utcnow() + timedelta(days=random.randint(1, 30))
+
+            # ตรวจสอบก่อนว่า email นี้มีอยู่แล้วหรือไม่
+            existing = db.query(Token).filter(Token.email == email).first()
+            if not existing:
+                new_token = Token(
+                    email=email,
+                    access_token=access_token,
+                    refresh_token=refresh_token,
+                    expiry=expiry,
+                    updated_at=datetime.utcnow()
+                )
+                db.add(new_token)
+        db.commit()
+        return {"message": "เพิ่ม email mockup แล้ว 50 รายการ"}
+    except Exception as e:
+        db.rollback()
+        return {"error": str(e)}
+    finally:
+        db.close()
 
 # =============================================================================================
 @app.get("/auth-redirect", response_class=HTMLResponse)
@@ -2093,7 +2131,7 @@ async def auth_redirect(request: Request, auth_url: str, email: str = None):
     return templates.TemplateResponse(
         "auth_redirect.html", 
         {
-            "request": request,  # จำเป็นต้องส่งตัวแปร request ให้กับ Jinja2
+            "request": request,  
             "auth_url": decoded_auth_url,
             "email": email
         }
