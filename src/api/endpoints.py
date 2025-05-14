@@ -694,10 +694,7 @@ def get_multiple_users_events(request: ManagerRecruiter):
         response["message"] = f"ผู้ใช้ต่อไปนี้ยังไม่ได้ยืนยันตัวตน ใช้ /events/<email> เพื่อยืนยันตัวตน: {', '.join(all_without_auth)}"
     
     return JSONResponse(content=response)
-
-
-    
-# API endpoint ที่ปรับปรุงใหม่
+  
 @app.post("/events/create-bulk")
 def create_bulk_events(event_request: BulkEventRequest):
     """สร้างการนัดหมายโดยใช้ name1 เป็น organizer และเพิ่ม name2 เป็นผู้เข้าร่วม"""
@@ -750,6 +747,93 @@ def create_bulk_events(event_request: BulkEventRequest):
                 },
                 headers={"Response-Type": "object"}
             )
+            
+        # รับ credentials ของ name1
+        token_entry1 = get_token(name1_email)
+        creds1 = Credentials(
+            token=token_entry1.access_token,
+            refresh_token=token_entry1.refresh_token,
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=CLIENT_ID,
+            client_secret=CLIENT_SECRET,
+            scopes=SCOPES
+        )
+        
+        # สร้าง service สำหรับ name1
+        service1 = build('calendar', 'v3', credentials=creds1)
+        
+        # ตรวจสอบว่ามีกิจกรรมซ้ำซ้อนในช่วงเวลาเดียวกันหรือไม่
+        time_min = start_time
+        time_max = end_time
+        
+        # ตรวจสอบปฏิทินของ name1
+        events_result1 = service1.events().list(
+            calendarId='primary',
+            timeMin=time_min,
+            timeMax=time_max,
+            singleEvents=True,
+            orderBy='startTime'
+        ).execute()
+        events1 = events_result1.get('items', [])
+        
+        # ตรวจสอบปฏิทินของ name2
+        if is_token_valid(name2_email):
+            token_entry2 = get_token(name2_email)
+            creds2 = Credentials(
+                token=token_entry2.access_token,
+                refresh_token=token_entry2.refresh_token,
+                token_uri="https://oauth2.googleapis.com/token",
+                client_id=CLIENT_ID,
+                client_secret=CLIENT_SECRET,
+                scopes=SCOPES
+            )
+            service2 = build('calendar', 'v3', credentials=creds2)
+            events_result2 = service2.events().list(
+                calendarId='primary',
+                timeMin=time_min,
+                timeMax=time_max,
+                singleEvents=True,
+                orderBy='startTime'
+            ).execute()
+            events2 = events_result2.get('items', [])
+        else:
+            events2 = []
+        
+        # ถ้ามีกิจกรรมในช่วงเวลาเดียวกัน ให้แจ้งเตือนและยกเลิกการสร้างนัดหมาย
+        if events1 or events2:
+            conflict_events = []
+            
+            # รวบรวมรายการกิจกรรมที่ซ้ำซ้อน
+            for event in events1:
+                conflict_events.append({
+                    'title': event.get('summary', 'ไม่มีชื่อ'),
+                    'start': event.get('start', {}).get('dateTime', ''),
+                    'end': event.get('end', {}).get('dateTime', ''),
+                    'calendar_owner': name1
+                })
+            
+            for event in events2:
+                conflict_events.append({
+                    'title': event.get('summary', 'ไม่มีชื่อ'),
+                    'start': event.get('start', {}).get('dateTime', ''),
+                    'end': event.get('end', {}).get('dateTime', ''),
+                    'calendar_owner': name2
+                })
+            
+            # สร้าง Line Response สำหรับกรณีที่มีกิจกรรมซ้ำซ้อน
+            line_response = {
+                "type": "text",
+                "text": f"ขออภัย ไม่สามารถทำการสร้างนัดได้เนื่องจากมีกิจกรรมอยู่แล้ว"
+            }
+            
+            return JSONResponse(
+                content={
+                    "message": "มีกิจกรรมซ้ำซ้อนในช่วงเวลาเดียวกัน",
+                    "conflict_events": conflict_events,
+                    "line_payload": [line_response]
+                },
+                headers={"Response-Type": "object"}
+            )
         
         # เตรียมรายชื่อผู้เข้าร่วมเพิ่มเติม
         additional_attendees = []
@@ -787,20 +871,6 @@ def create_bulk_events(event_request: BulkEventRequest):
         
         # สร้างการนัดหมายเพียงครั้งเดียวโดยใช้ name1 เป็น organizer
         try:
-            # รับ credentials ของ name1
-            token_entry1 = get_token(name1_email)
-            creds1 = Credentials(
-                token=token_entry1.access_token,
-                refresh_token=token_entry1.refresh_token,
-                token_uri="https://oauth2.googleapis.com/token",
-                client_id=CLIENT_ID,
-                client_secret=CLIENT_SECRET,
-                scopes=SCOPES
-            )
-            
-            # สร้าง service สำหรับ name1
-            service1 = build('calendar', 'v3', credentials=creds1)
-            
             # เพิ่มทั้ง name1 และ name2 เป็นผู้เข้าร่วม (แม้ว่า name1 จะเป็น organizer)
             # ซึ่งจะช่วยให้แสดงรายชื่อในส่วนของผู้เข้าร่วมอย่างชัดเจน
             attendees = [
@@ -822,43 +892,6 @@ def create_bulk_events(event_request: BulkEventRequest):
                 'event_id': created_event['id'],
                 'html_link': created_event['htmlLink']
             })
-            
-            # ส่งอีเมลแจ้งเตือนถึง name1
-            send_notification_email(
-                receiver_email=name1_email,
-                subject=event_summary,
-                body=f"""มีการนัดหมายใหม่
-            
-            หัวข้อ: {event_summary}
-            วันที่: {event_request.date}
-            เวลา: {event_request.time}
-            สถานที่: {event_request.event_location or event_request.location}
-            ผู้เข้าร่วม: {name2}
-
-            ดูรายละเอียดเพิ่มเติมได้ที่: {created_event['htmlLink']}
-
-            ขอบคุณค่ะ
-            """
-            )
-            
-            # ส่งอีเมลแจ้งเตือนถึง name2 ด้วย (เผื่อกรณีที่ name2 ไม่ได้รับอีเมลจาก Google Calendar)
-            send_notification_email(
-                receiver_email=name2_email,
-                subject=event_summary,
-                body=f"""มีการนัดหมายใหม่
-            
-            หัวข้อ: {event_summary}
-            วันที่: {event_request.date}
-            เวลา: {event_request.time}
-            สถานที่: {event_request.event_location or event_request.location}
-            ผู้จัด: {name1}
-            ผู้เข้าร่วม: คุณและ {name1}
-
-            ดูรายละเอียดเพิ่มเติมได้ที่: {created_event['htmlLink']}
-
-            ขอบคุณค่ะ
-            """
-            )
             
         except Exception as e:
             print(f"เกิดข้อผิดพลาดในการสร้างการนัดหมาย: {str(e)}")
@@ -887,7 +920,7 @@ def create_bulk_events(event_request: BulkEventRequest):
         # สร้าง Line Response แบบ text ธรรมดา
         line_response = {
             "type": "text",
-            "text": f"นัดใน Google Calendar และส่งอีเมลเรียบร้อยแล้ว สำหรับ {name1} และ {name2} ในหัวข้อ \"{event_summary}\" วันที่ {event_request.date} เวลา {event_request.time}"
+            "text": f"นัดใน Google Calendar เรียบร้อยแล้ว สำหรับ {name1} และ {name2} ในหัวข้อ \"{event_summary}\" วันที่ {event_request.date} เวลา {event_request.time}"
         }
         
         # คืนค่าข้อมูลพร้อมกับ Line Response Object
@@ -1928,6 +1961,7 @@ def get_available_pairs(request: TimeSlotRequest):
     items = []
     
     for i, pair_detail in enumerate(available_pairs, start=1):
+        pairs = pair_detail["pair"]
         message_text += f"   {i}.👥 {pair_detail['pair']}\n"
         
         # สร้างปุ่ม quick reply (สูงสุด 12 รายการเพื่อเหลือที่สำหรับปุ่มย้อนกลับ)
@@ -1937,7 +1971,7 @@ def get_available_pairs(request: TimeSlotRequest):
                 "action": {
                     "type": "message",
                     "label": f"({i})",
-                    "text": f"({i})"
+                    "text": pairs
                 }
             })
     

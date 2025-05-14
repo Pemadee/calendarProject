@@ -134,10 +134,10 @@ def handle_message(event):
                 # ===== Got events =====
                 if resp.status_code == 200:
                     line_bot_api.push_message(user_id, TextSendMessage(text=f"✅ Login สำเร็จ"))
-                                            # reset session
                     session.clear()
                     session["state"] = "initial"
                     send_menu_only(user_id)
+                
                 else:
                     line_bot_api.push_message(
                         user_id,
