@@ -1,40 +1,35 @@
-# Standard library
-import asyncio
-from concurrent.futures import ThreadPoolExecutor
-from email.mime.multipart import MIMEMultipart
-import json
+# 1. Standard Library Imports
 import os
-from datetime import datetime, time, timedelta, timezone
 import smtplib
 import sys
+import threading
 import time as timeTest
+from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 
-# Third-party libraries
+
+# 2. Third-Party Library Imports
+import pandas as pd
 from google.auth.transport.requests import Request as GoogleRequest
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
-import pandas as pd
-from email.mime.text import MIMEText
-from collections import defaultdict
-import threading
-from src.utils.token_db import *
-from src.models.token_model import SessionLocal
-from google.oauth2.credentials import Credentials
-from google.auth.transport.requests import Request as GoogleRequest
-from src.config import CLIENT_ID, CLIENT_SECRET, SCOPES
-from datetime import datetime
 
-# Local application
+
+# 3. Local Application Imports
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
-# from src.api.endpoints import FILE_PATH
-from src.config import *
+
+from config import CLIENT_ID, CLIENT_SECRET, SCOPES
 from src.api.endpoints import *
-from src.models.schemas import ManagerRecruiter
-thread_pool = ThreadPoolExecutor(max_workers=20)
+from src.config import *
+from utils.token_db import *
+
 base_url = os.environ.get('BASE_URL')
-EMAIL_SENDER = os.getenv("EMAIL_to_SEND_MESSAGE")
-EMAIL_PASSWORD = os.getenv("PASSWORD_EMAIL")
+# EMAIL_SENDER = os.getenv("EMAIL_to_SEND_MESSAGE")
+# EMAIL_PASSWORD = os.getenv("PASSWORD_EMAIL")
 FILE_PATH = os.path.join(os.path.dirname(__file__), '..', '..', os.getenv("FILE_PATH"))
 # สร้าง lock แยกตามอีเมล
 email_locks = defaultdict(threading.Lock)
@@ -277,11 +272,24 @@ def get_people(file_path,
 
     # ---------- 8) กรอง Age ----------
     if age_key and 'Age' in df_M.columns:
-        df_M['Age'] = df_M['Age'].astype(str)
-        df_M = df_M[df_M['Age'].str.contains(age_key, case=False, na=False)]
+        try:
+            age_value = int(age_key)
+            
+            # สร้าง mask สำหรับกรองข้อมูล
+            numeric_mask = pd.to_numeric(df_M['Age'], errors='coerce').notna()  # เช็คว่าแปลงเป็นตัวเลขได้
+            age_filter_mask = pd.to_numeric(df_M['Age'], errors='coerce') < age_value  # เช็คว่าอายุน้อยกว่า age_key
+            
+            # กรองเฉพาะแถวที่ค่า Age เป็นตัวเลขและน้อยกว่า age_key
+            df_M = df_M[numeric_mask & age_filter_mask]
+            
+            # ถ้าต้องการรวม "all" ในผลลัพธ์ ให้เพิ่มบรรทัดด้านล่างนี้
+            # all_mask = df_M['Age'].astype(str).str.lower() == 'all'
+            # df_M = pd.concat([df_M, df_M_original[all_mask]])
+            
+        except (ValueError, TypeError):
+            print(f"Warning: age_key '{age_key}' is not a valid number")
     
-    print(df_M)
-
+    
     # ---------- 9) เตรียมผลลัพธ์ (dict → list ของ dict) ----------
     list_M = (
         df_M[['Name', 'Email', 'Location']]
@@ -323,24 +331,24 @@ def parse_event_time(time_str):
         dt = datetime.strptime(time_str, '%Y-%m-%d')
         return dt.replace(tzinfo=timezone.utc)
 
-def send_notification_email(receiver_email: str, subject: str, body: str):
-    try:
-        msg = MIMEMultipart()
-        msg['From'] = EMAIL_SENDER
-        msg['To'] = receiver_email
-        msg['Subject'] = subject
+# def send_notification_email(receiver_email: str, subject: str, body: str):
+#     try:
+#         msg = MIMEMultipart()
+#         msg['From'] = EMAIL_SENDER
+#         msg['To'] = receiver_email
+#         msg['Subject'] = subject
 
-        msg.attach(MIMEText(body, 'plain'))
+#         msg.attach(MIMEText(body, 'plain'))
 
-        # ใช้ Gmail SMTP Server
-        with smtplib.SMTP('smtp.gmail.com', 587) as server:
-            server.starttls()
-            server.login(EMAIL_SENDER, EMAIL_PASSWORD)
-            server.send_message(msg)
+#         # ใช้ Gmail SMTP Server
+#         with smtplib.SMTP('smtp.gmail.com', 587) as server:
+#             server.starttls()
+#             server.login(EMAIL_SENDER, EMAIL_PASSWORD)
+#             server.send_message(msg)
         
-        print(f"✅ ส่งอีเมลสำเร็จไปยัง {receiver_email}")
-    except Exception as e:
-        print(f"❌ ส่งอีเมลล้มเหลว: {str(e)}")
+#         print(f"✅ ส่งอีเมลสำเร็จไปยัง {receiver_email}")
+#     except Exception as e:
+#         print(f"❌ ส่งอีเมลล้มเหลว: {str(e)}")
 
 def get_day_suffix(day):
     if 11 <= day <= 13:

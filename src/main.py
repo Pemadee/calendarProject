@@ -14,8 +14,6 @@ import utils.auto_refresh_jobs
 from models.token_model import init_db
 init_db()  
 scheduler.start()
-
-
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     print(f"เริ่มต้น FastAPI บน port {port}...")
