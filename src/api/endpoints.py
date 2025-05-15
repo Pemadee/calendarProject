@@ -1,6 +1,7 @@
 # 1. Standard Library Imports
 import os
 import random
+from sched import scheduler
 import sys
 import time as timeTest
 from datetime import datetime, time, timedelta, timezone
@@ -21,13 +22,13 @@ from googleapiclient.discovery import build
 from typing import Dict, Optional
 
 # 3. Local Application Imports
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
+# sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
-from src.config import *
-from src.models.schemas import *
-from src.models.token_model import TokenResponse
-from src.utils.func import *
-from src.utils.token_db import *
+from config import *
+from models.schemas import *
+from models.token_model import TokenResponse
+from utils.func import *
+from utils.token_db import *
 
 
 logging.basicConfig(level=logging.INFO)
@@ -59,7 +60,6 @@ FILE_PATH = os.path.join(os.path.dirname(__file__), '..', '..', os.getenv("FILE_
 logging.getLogger('googleapiclient.discovery_cache').setLevel(logging.ERROR)
 base_url = os.environ.get('BASE_URL')
 CLIENT_SECRET_FILE = os.getenv("CLIENT_SECRET_FILE")
-
 
 @app.middleware("http")
 async def catch_all(request: Request, call_next):
