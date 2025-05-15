@@ -1,6 +1,6 @@
 # Standard library
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import datetime,time, timedelta, timezone
 from pathlib import Path
 import random
 import time as timeTest
@@ -15,10 +15,8 @@ from fastapi.templating import Jinja2Templates
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
-from linebot.exceptions import InvalidSignatureError
 from typing import Dict, Optional
 import logging
-from linebot import LineBotApi, WebhookHandler
 import time as timeTest
 import holidays
 
@@ -29,7 +27,7 @@ from src.utils.func import *
 from src.models.schemas import *
 import logging
 from src.utils.token_db import *
-from src.models.token_model import TokenResponse, EmailResponse
+from src.models.token_model import TokenResponse
 
 logging.basicConfig(level=logging.INFO)
 

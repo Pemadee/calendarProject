@@ -1,10 +1,8 @@
 # Standard library
-import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from email.mime.multipart import MIMEMultipart
-import json
 import os
-from datetime import datetime, time, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 import smtplib
 import sys
 import time as timeTest
