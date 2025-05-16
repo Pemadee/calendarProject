@@ -34,9 +34,9 @@ base_url = os.environ.get('BASE_URL')
 # EMAIL_SENDER = os.getenv("EMAIL_to_SEND_MESSAGE")
 # EMAIL_PASSWORD = os.getenv("PASSWORD_EMAIL")
 FILE_PATH = os.path.join(os.path.dirname(__file__), '..', '..', os.getenv("FILE_PATH"))
-# สร้าง lock แยกตามอีเมล
-email_locks = defaultdict(threading.Lock)
+email_locks = defaultdict(threading.Lock) # สร้าง lock แยกตามอีเมล
 
+spreadsheet_id = os.environ.get('SPREADSHEET_ID')
 credentialsGsheet = os.environ.get('CREDENTIALS_GOOGLE_SHEET')
 scopeGsheet = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
 credentialsGsheet = ServiceAccountCredentials.from_json_keyfile_name(credentialsGsheet, scopeGsheet)
@@ -312,8 +312,7 @@ def add_location_column(df):
     
 #     return {'M': list_M, 'R': list_R}
 
-def get_people(spreadsheet_id,
-                     location=None,
+def get_people(location=None,
                      english_min=None,
                      exp_kind=None,
                      age_key=None):
@@ -506,8 +505,6 @@ def refresh_token_safe(user_email: str):
 
     return creds
 
-# เพิ่มฟังก์ชันสำหรับการค้นหาอีเมลจาก Excel
-
 def find_emails_from_name_pair(name_pair, location):
     """
     รับชื่อในรูปแบบ "name1-name2" และ location เพื่อค้นหาอีเมลจาก Excel
@@ -522,7 +519,13 @@ def find_emails_from_name_pair(name_pair, location):
     # อ่านไฟล์ Excel
     try:
         # ปรับ path ตามที่เก็บไฟล์จริง
-        excel_path = str(FILE_PATH)
+        
+        sheet = client.open_by_key(spreadsheet_id)
+        worksheet_M = sheet.worksheet('M')
+        worksheet_R = sheet.worksheet('R')
+
+        
+
         
         # แยกชื่อ
         try:
@@ -530,11 +533,9 @@ def find_emails_from_name_pair(name_pair, location):
         except ValueError:
             raise ValueError(f"รูปแบบชื่อไม่ถูกต้อง: {name_pair} (ต้องเป็น 'name1-name2')")
         
-        # อ่านข้อมูลจากชีต M
-        df_m = pd.read_excel(excel_path, sheet_name='M')
-        
-        # อ่านข้อมูลจากชีต R
-        df_r = pd.read_excel(excel_path, sheet_name='R')
+
+        df_m = get_as_dataframe(worksheet_M, evaluate_formulas=True, skiprows=0)
+        df_r = get_as_dataframe(worksheet_R, evaluate_formulas=True, skiprows=0)
         
         # ค้นหาในชีต M
         email1 = None
@@ -591,7 +592,6 @@ def find_emails_from_name_pair(name_pair, location):
     except Exception as e:
         raise Exception(f"เกิดข้อผิดพลาดในการอ่านข้อมูลจาก Excel: {str(e)}")
 
-# ฟังก์ชันแปลงเวลาจากรูปแบบที่เข้าใจง่ายเป็นรูปแบบ ISO
 def convert_to_iso_format(date, time):
     """
     แปลงข้อมูลวันที่และเวลาจากรูปแบบง่ายๆ เป็นรูปแบบ ISO
