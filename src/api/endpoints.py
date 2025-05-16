@@ -890,6 +890,7 @@ def get_available_time_slots(request: ManagerRecruiter):
 # API 1: ดึงวัน
 @app.post("/events/available-dates")
 def get_available_dates(request: ManagerRecruiter2):
+    print(request)
     """
     ดึงข้อมูลวันที่มีเวลาว่างตรงกันระหว่าง Manager และ Recruiter
     แสดงวันที่มีคู่ว่างให้ครบ 7 วัน โดยเว้นวันเสาร์-อาทิตย์
@@ -1104,6 +1105,7 @@ def get_available_dates(request: ManagerRecruiter2):
         content=response,
         headers={"Response-Type": "object"}
     )
+
 # API 2: ดึงช่วงเวลาและคู่ในวันที่เลือก
 @app.post("/events/available-timeslots")
 def get_available_timeslots(request: DateRequest):
@@ -1319,6 +1321,7 @@ def get_available_timeslots(request: DateRequest):
         content=response,
         headers={"Response-Type": "object"}
     )
+
 # API 3: ดึงรายละเอียดของคู่ที่ว่างในช่วงเวลาที่เลือก
 @app.post("/events/available-pairs")
 def get_available_pairs(request: TimeSlotRequest):
