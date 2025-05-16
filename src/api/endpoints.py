@@ -55,7 +55,8 @@ app.add_middleware(
 
 
 REDIRECT_URI = 'http://localhost:8000/'  # กำหนด redirect URI 
-FILE_PATH = os.path.join(os.path.dirname(__file__), '..', '..', os.getenv("FILE_PATH"))
+# FILE_PATH = os.path.join(os.path.dirname(__file__), '..', '..', os.getenv("FILE_PATH"))
+FILE_PATH = os.environ.get('SPREADSHEET_ID')
 # ปอดการแจ้งเตือน INFO:googleapiclient.discovery_cache:file_cache is only supported with oauth2client<4.0.0
 logging.getLogger('googleapiclient.discovery_cache').setLevel(logging.ERROR)
 base_url = os.environ.get('BASE_URL')
@@ -266,7 +267,7 @@ def get_multiple_users_events(request: ManagerRecruiter):
     
     # ใช้ฟังก์ชัน get_people เพื่อรับรายชื่ออีเมลผู้ใช้แยกตามประเภท M และ R
     users_dict = get_people(
-        file_path=FILE_PATH,
+        spreadsheet_id=FILE_PATH,
         location=request.location,
         english_min=request.english_min,
         exp_kind=request.exp_kind,
@@ -486,7 +487,7 @@ def get_multiple_users_events(request: ManagerRecruiter):
 def get_multiple_users_events(body: getManagerRecruiter):
     try:
         people = get_people(
-            file_path=FILE_PATH,          
+            spreadsheet_id=FILE_PATH,          
             location=body.location,
             english_min=body.english_min,
             exp_kind=body.exp_kind,
@@ -510,7 +511,7 @@ def get_available_time_slots(request: ManagerRecruiter):
     """
     # ใช้ฟังก์ชัน get_people เพื่อรับรายชื่ออีเมลผู้ใช้แยกตามประเภท M และ R
     users_dict = get_people(
-        file_path=str(FILE_PATH),
+        spreadsheet_id=str(FILE_PATH),
         location=request.location,
         english_min=request.english_min,
         exp_kind=request.exp_kind,
@@ -899,7 +900,7 @@ def get_available_dates(request: ManagerRecruiter2):
     # ใช้ฟังก์ชัน get_people เพื่อรับรายชื่ออีเมลผู้ใช้แยกตามประเภท M และ R
     t1 = timeTest.time()
     users_dict = get_people(
-        file_path=str(FILE_PATH),
+        spreadsheet_id=str(FILE_PATH),
         location=request.location,
         english_min=request.english_min,
         exp_kind=request.exp_kind,
@@ -1116,7 +1117,7 @@ def get_available_timeslots(request: DateRequest):
     # ใช้ฟังก์ชัน get_people เพื่อรับรายชื่ออีเมลผู้ใช้แยกตามประเภท M และ R
     t1 = timeTest.time()
     users_dict = get_people(
-        file_path=str(FILE_PATH),
+        spreadsheet_id=str(FILE_PATH),
         location=request.location,
         english_min=request.english_min,
         exp_kind=request.exp_kind,
@@ -1331,7 +1332,7 @@ def get_available_pairs(request: TimeSlotRequest):
     # ใช้ฟังก์ชัน get_people เพื่อรับรายชื่ออีเมลผู้ใช้แยกตามประเภท M และ R
     t1 = timeTest.time()
     users_dict = get_people(
-        file_path=str(FILE_PATH),
+        spreadsheet_id=str(FILE_PATH),
         location=request.location,
         english_min=request.english_min,
         exp_kind=request.exp_kind,
