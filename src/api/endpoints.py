@@ -1,7 +1,6 @@
 # 1. Standard Library Imports
 import os
 import random
-from sched import scheduler
 import sys
 import time as timeTest
 from datetime import datetime, time, timedelta, timezone
@@ -29,6 +28,7 @@ from models.schemas import *
 from models.token_model import TokenResponse
 from utils.func import *
 from utils.token_db import *
+from utils.scheduler_instance import scheduler
 
 
 logging.basicConfig(level=logging.INFO)
@@ -70,6 +70,13 @@ async def catch_all(request: Request, call_next):
             content={"error": "Path not found", "path": str(request.url)}
         )
     return response
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    print("📴 กำลังปิด scheduler...")
+    if scheduler.running:
+        scheduler.shutdown()
+    print("✅ ปิด scheduler เรียบร้อยแล้ว")
 
 @app.get("/")
 def read_root():

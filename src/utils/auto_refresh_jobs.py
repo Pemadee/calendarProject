@@ -1,4 +1,3 @@
-# src/utils/auto_refresh_jobs.py
 from datetime import datetime
 from utils.scheduler_instance import scheduler
 from utils.token_db import get_all_tokens

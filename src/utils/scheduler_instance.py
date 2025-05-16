@@ -1,4 +1,3 @@
-# src/utils/scheduler_instance.py
 from apscheduler.schedulers.background import BackgroundScheduler
 
 # สร้าง scheduler instance ด้วยค่าที่เหมาะสม
@@ -10,4 +9,3 @@ scheduler = BackgroundScheduler(
     }
 )
 
-print("✅ scheduler_instance.py ถูกโหลด")

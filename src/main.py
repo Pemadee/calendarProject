@@ -23,7 +23,7 @@ try:
         id='auto_refresh_tokens_job',
         replace_existing=True
     )
-    print("✅ เพิ่ม job auto_refresh_tokens สำเร็จ (ทำงานทุก 1 นาที)")
+    print("✅ เพิ่ม job auto_refresh_tokens สำเร็จ (ทำงานทุก 15 นาที)")
 except Exception as e:
     print(f"❌ ไม่สามารถเพิ่ม job ได้: {e}")
 
