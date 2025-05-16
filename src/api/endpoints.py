@@ -1,12 +1,15 @@
-# Standard library
+# 1. Standard Library Imports
 import os
-from datetime import datetime,time, timedelta, timezone
-from pathlib import Path
 import random
-import time as timeTest
 import sys
+import time as timeTest
+from datetime import datetime, time, timedelta, timezone
+from pathlib import Path
 from urllib.parse import quote_plus, unquote_plus
-# Third-party libraries
+
+# 2. Third-party Library Imports
+import holidays
+import logging
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,18 +19,16 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from typing import Dict, Optional
-import logging
-import time as timeTest
-import holidays
 
-# Local application
+# 3. Local Application Imports
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
+
 from src.config import *
-from src.utils.func import *
 from src.models.schemas import *
-import logging
-from src.utils.token_db import *
 from src.models.token_model import TokenResponse
+from src.utils.func import *
+from src.utils.token_db import *
+
 
 logging.basicConfig(level=logging.INFO)
 
@@ -53,15 +54,11 @@ app.add_middleware(
 
 
 REDIRECT_URI = 'http://localhost:8000/'  # กำหนด redirect URI 
-AUTH_PORT = 8080  # พอร์ต redirect
 FILE_PATH = os.path.join(os.path.dirname(__file__), '..', '..', os.getenv("FILE_PATH"))
 # ปอดการแจ้งเตือน INFO:googleapiclient.discovery_cache:file_cache is only supported with oauth2client<4.0.0
 logging.getLogger('googleapiclient.discovery_cache').setLevel(logging.ERROR)
 base_url = os.environ.get('BASE_URL')
-EMAIL_SENDER = os.getenv("EMAIL_to_SEND_MESSAGE")
-EMAIL_PASSWORD = os.getenv("PASSWORD_EMAIL")
 CLIENT_SECRET_FILE = os.getenv("CLIENT_SECRET_FILE")
-logger = logging.getLogger(__name__)
 
 
 @app.middleware("http")
@@ -1741,7 +1738,7 @@ def create_bulk_events(event_request: BulkEventRequest):
         # สร้าง Line Response แบบ text ธรรมดา
         line_response = {
             "type": "text",
-            "text": f"นัดใน Google Calendar เรียบร้อยแล้ว สำหรับ {name1} และ {name2} ในหัวข้อ \"{event_summary}\" วันที่ {event_request.date} เวลา {event_request.time}"
+            "text": f"✅สร้างนัดใน Calendar เรียบร้อย\nหัวข้อ : {event_summary}\n📅วัน : {event_request.date}\n🕒 เวลา : {event_request.time} น.\n👤 Manager: {name1}"
         }
         
         # คืนค่าข้อมูลพร้อมกับ Line Response Object
