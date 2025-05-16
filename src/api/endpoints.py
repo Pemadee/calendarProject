@@ -21,13 +21,14 @@ from googleapiclient.discovery import build
 from typing import Dict, Optional
 
 # 3. Local Application Imports
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
+# sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
-from src.config import *
-from src.models.schemas import *
-from src.models.token_model import TokenResponse
-from src.utils.func import *
-from src.utils.token_db import *
+from config import *
+from models.schemas import *
+from models.token_model import TokenResponse
+from utils.func import *
+from utils.token_db import *
+from utils.scheduler_instance import scheduler
 
 
 logging.basicConfig(level=logging.INFO)
@@ -60,7 +61,6 @@ logging.getLogger('googleapiclient.discovery_cache').setLevel(logging.ERROR)
 base_url = os.environ.get('BASE_URL')
 CLIENT_SECRET_FILE = os.getenv("CLIENT_SECRET_FILE")
 
-
 @app.middleware("http")
 async def catch_all(request: Request, call_next):
     response = await call_next(request)
@@ -70,6 +70,13 @@ async def catch_all(request: Request, call_next):
             content={"error": "Path not found", "path": str(request.url)}
         )
     return response
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    print("📴 กำลังปิด scheduler...")
+    if scheduler.running:
+        scheduler.shutdown()
+    print("✅ ปิด scheduler เรียบร้อยแล้ว")
 
 @app.get("/")
 def read_root():
