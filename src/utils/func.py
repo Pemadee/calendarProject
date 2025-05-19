@@ -33,7 +33,6 @@ from utils.token_db import *
 base_url = os.environ.get('BASE_URL')
 # EMAIL_SENDER = os.getenv("EMAIL_to_SEND_MESSAGE")
 # EMAIL_PASSWORD = os.getenv("PASSWORD_EMAIL")
-FILE_PATH = os.path.join(os.path.dirname(__file__), '..', '..', os.getenv("FILE_PATH"))
 email_locks = defaultdict(threading.Lock) # สร้าง lock แยกตามอีเมล
 
 spreadsheet_id = os.environ.get('SPREADSHEET_ID')
@@ -371,7 +370,7 @@ def get_people(location=None,
         else:
             df_M = df_M[exp_low.str.contains(exp_kind.lower(), na=False)]
 
-    # ---------- 9) กรอง Age ----------
+    # ---------- 8) กรอง Age ----------
     if age_key and 'Age' in df_M.columns:
         try:
             age_value = int(age_key)
@@ -382,6 +381,10 @@ def get_people(location=None,
             
             # กรองเฉพาะแถวที่ค่า Age เป็นตัวเลขและน้อยกว่า age_key
             df_M = df_M[numeric_mask & age_filter_mask]
+            
+            # ถ้าต้องการรวม "all" ในผลลัพธ์ ให้เพิ่มบรรทัดด้านล่างนี้
+            # all_mask = df_M['Age'].astype(str).str.lower() == 'all'
+            # df_M = pd.concat([df_M, df_M_original[all_mask]])
             
         except (ValueError, TypeError):
             print(f"Warning: age_key '{age_key}' is not a valid number")
