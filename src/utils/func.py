@@ -17,6 +17,9 @@ from google.auth.transport.requests import Request as GoogleRequest
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
+from gspread_dataframe import get_as_dataframe
 
 
 # 3. Local Application Imports
@@ -31,8 +34,15 @@ base_url = os.environ.get('BASE_URL')
 # EMAIL_SENDER = os.getenv("EMAIL_to_SEND_MESSAGE")
 # EMAIL_PASSWORD = os.getenv("PASSWORD_EMAIL")
 FILE_PATH = os.path.join(os.path.dirname(__file__), '..', '..', os.getenv("FILE_PATH"))
-# สร้าง lock แยกตามอีเมล
-email_locks = defaultdict(threading.Lock)
+email_locks = defaultdict(threading.Lock) # สร้าง lock แยกตามอีเมล
+
+spreadsheet_id = os.environ.get('SPREADSHEET_ID')
+credentialsGsheet = os.environ.get('CREDENTIALS_GOOGLE_SHEET')
+scopeGsheet = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+credentialsGsheet = ServiceAccountCredentials.from_json_keyfile_name(credentialsGsheet, scopeGsheet)
+client = gspread.authorize(credentialsGsheet)
+
+
 
 
 def is_token_valid(user_email: str) -> bool:
@@ -223,44 +233,135 @@ def add_location_column(df):
     df['Location'] = loc_list
     return df
 
-def get_people(file_path,
-               location=None,
-               english_min=None,
-               exp_kind=None,
-               age_key=None):
+# def get_people(file_path,
+#                location=None,
+#                english_min=None,
+#                exp_kind=None,
+#                age_key=None):
+#     """
+#     อ่านไฟล์ Excel แล้วกรองข้อมูลตามเงื่อนไข
+#     พร้อมคืนชื่อ‑อีเมล‑สถานที่ ของชีต M และ R
+#     """
+    
+#     # ---------- 1) โหลดทุกชีต ----------
+#     sheets = pd.read_excel(file_path, sheet_name=None)
+#     df_M = sheets['M'].copy()
+#     df_R = sheets['R'].copy()
+
+#     # ---------- 2) เปลี่ยนชื่อคอลัมน์แรกเป็น Name ----------
+#     df_M.rename(columns={df_M.columns[0]: 'Name'}, inplace=True)
+#     df_R.rename(columns={df_R.columns[0]: 'Name'}, inplace=True)
+
+#     # ---------- 3) เติมคอลัมน์ Location ----------
+#     df_M = add_location_column(df_M)
+#     df_R = add_location_column(df_R)
+
+#     # ---------- 4) ตัดแถวตัวคั่น (Email เป็น NaN) ----------
+#     df_M = df_M[df_M['Email'].notna()].reset_index(drop=True)
+#     df_R = df_R[df_R['Email'].notna()].reset_index(drop=True)
+
+#     # ---------- 5) กรองตาม Location ----------
+#     if location:
+#         df_M = df_M[df_M['Location'].str.contains(location, case=False, na=False)]
+#         df_R = df_R[df_R['Location'].str.contains(location, case=False, na=False)]
+
+#     # ---------- 6) กรอง English ----------
+#     if english_min is not None and 'English' in df_M.columns:
+#         df_M['Eng_num'] = pd.to_numeric(df_M['English'], errors='coerce')
+#         df_M = df_M[df_M['Eng_num'] >= english_min]
+
+#     # ---------- 7) กรอง Experience ----------
+#     if exp_kind and 'Experience' in df_M.columns:
+#         exp_low = df_M['Experience'].str.lower()
+#         if exp_kind.lower() == 'strong':
+#             cond = exp_low.str.contains('strong', na=False) & \
+#                    ~exp_low.str.contains('non', na=False)
+#             df_M = df_M[cond]
+#         else:
+#             df_M = df_M[exp_low.str.contains(exp_kind.lower(), na=False)]
+
+#     # ---------- 8) กรอง Age ----------
+#     if age_key and 'Age' in df_M.columns:
+#         try:
+#             age_value = int(age_key)
+            
+#             # สร้าง mask สำหรับกรองข้อมูล
+#             numeric_mask = pd.to_numeric(df_M['Age'], errors='coerce').notna()  # เช็คว่าแปลงเป็นตัวเลขได้
+#             age_filter_mask = pd.to_numeric(df_M['Age'], errors='coerce') < age_value  # เช็คว่าอายุน้อยกว่า age_key
+            
+#             # กรองเฉพาะแถวที่ค่า Age เป็นตัวเลขและน้อยกว่า age_key
+#             df_M = df_M[numeric_mask & age_filter_mask]
+            
+#             # ถ้าต้องการรวม "all" ในผลลัพธ์ ให้เพิ่มบรรทัดด้านล่างนี้
+#             # all_mask = df_M['Age'].astype(str).str.lower() == 'all'
+#             # df_M = pd.concat([df_M, df_M_original[all_mask]])
+            
+#         except (ValueError, TypeError):
+#             print(f"Warning: age_key '{age_key}' is not a valid number")
+    
+    
+#     # ---------- 9) เตรียมผลลัพธ์ (dict → list ของ dict) ----------
+#     list_M = (
+#         df_M[['Name', 'Email', 'Location']]
+#         .to_dict(orient='records')
+#     )
+#     list_R = (
+#         df_R[['Name', 'Email', 'Location']]
+#         .to_dict(orient='records')
+#     )
+    
+#     return {'M': list_M, 'R': list_R}
+
+def get_people(location=None,
+                     english_min=None,
+                     exp_kind=None,
+                     age_key=None):
     """
-    อ่านไฟล์ Excel แล้วกรองข้อมูลตามเงื่อนไข
+    อ่านข้อมูลจาก Google Sheet แล้วกรองข้อมูลตามเงื่อนไข
     พร้อมคืนชื่อ‑อีเมล‑สถานที่ ของชีต M และ R
     """
-    starttime = timeTest.time()
-    # ---------- 1) โหลดทุกชีต ----------
-    sheets = pd.read_excel(file_path, sheet_name=None)
-    df_M = sheets['M'].copy()
-    df_R = sheets['R'].copy()
+    
+    
+    
+    # ---------- 1) เชื่อมต่อกับ Google Sheets API ----------
+    # เปิดสเปรดชีตจาก ID
+    sheet = client.open_by_key(spreadsheet_id)
+    
+    # ---------- 2) โหลดทุกชีต ----------
+    worksheet_M = sheet.worksheet('M')
+    worksheet_R = sheet.worksheet('R')
+    
+    # แปลงข้อมูลเป็น DataFrame
+    df_M = get_as_dataframe(worksheet_M, evaluate_formulas=True, skiprows=0)
+    df_R = get_as_dataframe(worksheet_R, evaluate_formulas=True, skiprows=0)
+    
+    # กำจัดแถวที่เป็น NaN ทั้งหมด (แถวว่างท้ายตาราง)
+    df_M = df_M.dropna(how='all').reset_index(drop=True)
+    df_R = df_R.dropna(how='all').reset_index(drop=True)
 
-    # ---------- 2) เปลี่ยนชื่อคอลัมน์แรกเป็น Name ----------
+    # ---------- 3) เปลี่ยนชื่อคอลัมน์แรกเป็น Name ----------
     df_M.rename(columns={df_M.columns[0]: 'Name'}, inplace=True)
     df_R.rename(columns={df_R.columns[0]: 'Name'}, inplace=True)
 
-    # ---------- 3) เติมคอลัมน์ Location ----------
+    # ---------- 4) เติมคอลัมน์ Location ----------
     df_M = add_location_column(df_M)
     df_R = add_location_column(df_R)
 
-    # ---------- 4) ตัดแถวตัวคั่น (Email เป็น NaN) ----------
+    # ---------- 5) ตัดแถวตัวคั่น (Email เป็น NaN) ----------
     df_M = df_M[df_M['Email'].notna()].reset_index(drop=True)
     df_R = df_R[df_R['Email'].notna()].reset_index(drop=True)
 
-    # ---------- 5) กรองตาม Location ----------
+    # ---------- 6) กรองตาม Location ----------
     if location:
         df_M = df_M[df_M['Location'].str.contains(location, case=False, na=False)]
         df_R = df_R[df_R['Location'].str.contains(location, case=False, na=False)]
 
-    # ---------- 6) กรอง English ----------
+    # ---------- 7) กรอง English ----------
     if english_min is not None and 'English' in df_M.columns:
         df_M['Eng_num'] = pd.to_numeric(df_M['English'], errors='coerce')
         df_M = df_M[df_M['Eng_num'] >= english_min]
 
-    # ---------- 7) กรอง Experience ----------
+    # ---------- 8) กรอง Experience ----------
     if exp_kind and 'Experience' in df_M.columns:
         exp_low = df_M['Experience'].str.lower()
         if exp_kind.lower() == 'strong':
@@ -291,9 +392,10 @@ def get_people(file_path,
         except (ValueError, TypeError):
             print(f"Warning: age_key '{age_key}' is not a valid number")
 
+
     
     
-    # ---------- 9) เตรียมผลลัพธ์ (dict → list ของ dict) ----------
+    # ---------- 10) เตรียมผลลัพธ์ (dict → list ของ dict) ----------
     list_M = (
         df_M[['Name', 'Email', 'Location']]
         .to_dict(orient='records')
@@ -302,8 +404,7 @@ def get_people(file_path,
         df_R[['Name', 'Email', 'Location']]
         .to_dict(orient='records')
     )
-    endtime = timeTest.time()
-    # print(f"Took {endtime - starttime:.4f} sec")
+    
     return {'M': list_M, 'R': list_R}
 
 def is_available(events, start_time, end_time):
@@ -412,8 +513,6 @@ def refresh_token_safe(user_email: str):
 
     return creds
 
-# เพิ่มฟังก์ชันสำหรับการค้นหาอีเมลจาก Excel
-
 def find_emails_from_name_pair(name_pair, location):
     """
     รับชื่อในรูปแบบ "name1-name2" และ location เพื่อค้นหาอีเมลจาก Excel
@@ -428,7 +527,13 @@ def find_emails_from_name_pair(name_pair, location):
     # อ่านไฟล์ Excel
     try:
         # ปรับ path ตามที่เก็บไฟล์จริง
-        excel_path = str(FILE_PATH)
+        
+        sheet = client.open_by_key(spreadsheet_id)
+        worksheet_M = sheet.worksheet('M')
+        worksheet_R = sheet.worksheet('R')
+
+        
+
         
         # แยกชื่อ
         try:
@@ -436,11 +541,9 @@ def find_emails_from_name_pair(name_pair, location):
         except ValueError:
             raise ValueError(f"รูปแบบชื่อไม่ถูกต้อง: {name_pair} (ต้องเป็น 'name1-name2')")
         
-        # อ่านข้อมูลจากชีต M
-        df_m = pd.read_excel(excel_path, sheet_name='M')
-        
-        # อ่านข้อมูลจากชีต R
-        df_r = pd.read_excel(excel_path, sheet_name='R')
+
+        df_m = get_as_dataframe(worksheet_M, evaluate_formulas=True, skiprows=0)
+        df_r = get_as_dataframe(worksheet_R, evaluate_formulas=True, skiprows=0)
         
         # ค้นหาในชีต M
         email1 = None
@@ -497,7 +600,6 @@ def find_emails_from_name_pair(name_pair, location):
     except Exception as e:
         raise Exception(f"เกิดข้อผิดพลาดในการอ่านข้อมูลจาก Excel: {str(e)}")
 
-# ฟังก์ชันแปลงเวลาจากรูปแบบที่เข้าใจง่ายเป็นรูปแบบ ISO
 def convert_to_iso_format(date, time):
     """
     แปลงข้อมูลวันที่และเวลาจากรูปแบบง่ายๆ เป็นรูปแบบ ISO
