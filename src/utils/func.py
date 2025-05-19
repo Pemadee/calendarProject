@@ -33,7 +33,6 @@ from utils.token_db import *
 base_url = os.environ.get('BASE_URL')
 # EMAIL_SENDER = os.getenv("EMAIL_to_SEND_MESSAGE")
 # EMAIL_PASSWORD = os.getenv("PASSWORD_EMAIL")
-FILE_PATH = os.path.join(os.path.dirname(__file__), '..', '..', os.getenv("FILE_PATH"))
 email_locks = defaultdict(threading.Lock) # สร้าง lock แยกตามอีเมล
 
 spreadsheet_id = os.environ.get('SPREADSHEET_ID')
