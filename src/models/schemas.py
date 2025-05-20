@@ -15,10 +15,6 @@ class UsersRequest(BaseModel):
     end_date: Optional[str] = None    # เช่น "2025-05-30"
     start_time: Optional[str] = None  # เช่น "18:30:00"
     end_time: Optional[str] = None    # เช่น "19:00:00"
-<<<<<<< HEAD
-
-=======
->>>>>>> 11641662d473f2eca6fe55b7681f3e1cd84fdb11
 
 class BulkEventRequest(BaseModel):
     name_pair: str  # รับในรูปแบบ "name1-name2"
