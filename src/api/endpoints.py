@@ -198,6 +198,14 @@ def get_multiple_users_events(request: UsersRequest):
                 time_min = f"{request.start_date}T{start_time_str}+07:00" if request.start_date else datetime.utcnow().isoformat() + "Z"
                 time_max = f"{request.end_date}T{end_time_str}+07:00" if request.end_date else (datetime.utcnow() + timedelta(days=7)).isoformat() + "Z"
 
+                # ดึง start_time และ end_time จาก request ถ้าไม่มีให้ใช้ default
+                start_time_str = request.start_time or "00:00:00"
+                end_time_str = request.end_time or "23:59:59"
+
+                # เอา date + time รวมเป็นรูปแบบ ISO
+                time_min = f"{request.start_date}T{start_time_str}+07:00" if request.start_date else datetime.utcnow().isoformat() + "Z"
+                time_max = f"{request.end_date}T{end_time_str}+07:00" if request.end_date else (datetime.utcnow() + timedelta(days=7)).isoformat() + "Z"
+
                 print(f"กำลังดึงข้อมูลสำหรับ {user.email} จาก {time_min} ถึง {time_max}")
                 
                 # ดึงข้อมูลกิจกรรม
@@ -268,6 +276,7 @@ def get_multiple_users_events(request: UsersRequest):
 @app.post("/events/multipleMR")
 def get_multiple_users_events(request: ManagerRecruiter):
     """ดึงข้อมูลกิจกรรมของผู้ใช้หลายคน (เฉพาะผู้ใช้ที่ยืนยันตัวตนแล้ว) แยกตามประเภท M และ R"""
+
 
     results_m = []
     results_r = []
@@ -515,6 +524,7 @@ def get_available_time_slots(request: ManagerRecruiter):
     แสดงเฉพาะช่วงเวลาว่างในระหว่าง 09:00 - 18:00 โดยแบ่งเป็นช่วงละ 30 นาที
     แสดงผลเรียงตามเวลา โดยแต่ละช่วงเวลาจะแสดงคู่ที่ว่างทั้งหมด
     สามารถกำหนดระยะเวลา (time_period) เพื่อแสดงวันที่มีเวลาว่างตามจำนวนวันที่ต้องการ
+    สามารถกำหนดระยะเวลา (time_period) เพื่อแสดงวันที่มีเวลาว่างตามจำนวนวันที่ต้องการ
     """
     # ใช้ฟังก์ชัน get_people เพื่อรับรายชื่ออีเมลผู้ใช้แยกตามประเภท M และ R
     users_dict = get_people(
@@ -560,6 +570,9 @@ def get_available_time_slots(request: ManagerRecruiter):
     
     date_list = []
     current_date = start_datetime.date()
+    # while current_date <= end_datetime.date():
+    #     date_list.append(current_date)
+    #     current_date += timedelta(days=1)
     while current_date <= end_datetime.date():
         is_weekend = current_date.weekday() >= 5  # เสาร์=5, อาทิตย์=6
         is_holiday = current_date in THAI_HOLIDAYS
@@ -629,7 +642,7 @@ def get_available_time_slots(request: ManagerRecruiter):
         email = user_info["Email"]
         name = user_info["Name"]
         calendar_id = email
-        
+        starttime = timeTest.time()
         if is_token_valid(email):
             try:
                 # ดึง token จาก DB
@@ -890,7 +903,7 @@ def get_available_time_slots(request: ManagerRecruiter):
         "available_time_slots": line_friendly_results,
         "line_summary": "\n".join(line_summary)
     }
-    
+    # print(f"Took {endtime - starttime:.4f} sec")
     return JSONResponse(content=response)
 
 #================================================API appointment =============================================
