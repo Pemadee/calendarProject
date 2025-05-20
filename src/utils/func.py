@@ -82,6 +82,52 @@ def is_token_valid(user_email: str) -> bool:
     print(f"❌ Token หมดอายุและไม่มี refresh_token สำหรับ {user_email}")
     return False
 
+# def get_credentials(user_email: str):
+#     """รับ credentials สำหรับการเข้าถึง Google Calendar API"""
+#     token_path = os.path.join(TOKEN_DIR, f'token_{user_email}.json')
+#     creds = None
+    
+#     # ถ้ามีไฟล์ token อยู่แล้ว ให้ลองโหลด
+#     if os.path.exists(token_path):
+#         try:
+#             with open(token_path, 'r') as token_file:
+#                 creds = Credentials.from_authorized_user_info(json.load(token_file), SCOPES)
+#         except Exception as e:
+#             print(f"เกิดข้อผิดพลาดในการโหลด token: {str(e)}")
+    
+#     # ถ้าไม่มี token หรือไม่สามารถใช้งานได้ ให้สร้างใหม่
+#     if not creds or not creds.valid:
+#         if creds and creds.expired and creds.refresh_token:
+#             creds.refresh(GoogleRequest())
+#         else:
+#             # สร้าง flow แบบ web application
+#             flow = InstalledAppFlow.from_client_secrets_file(CLIENT_SECRET_FILE, SCOPES)
+            
+#             # กำหนด redirect_uri อย่างชัดเจน
+            
+#             flow.redirect_uri = f"{base_url}/oauth2callback"
+            
+#             # สร้าง authorization URL พร้อมกำหนด state ให้เก็บ email
+#             auth_url, _ = flow.authorization_url(
+#                 access_type='offline',
+#                 prompt='consent',
+#                 include_granted_scopes='true',
+#                 state=user_email  # เก็บ email ใน state เพื่อใช้อ้างอิงตอน callback
+#             )
+            
+#             # ส่งกลับ URL และสถานะที่ต้องการการยืนยันตัวตน
+#             return {
+#                 "requires_auth": True,
+#                 "auth_url": auth_url,
+#                 "redirect_uri": flow.redirect_uri
+#             }
+        
+#         # บันทึก token ใหม่
+#         with open(token_path, 'w') as token_file:
+#             token_file.write(creds.to_json())
+            
+#     return creds
+
 def get_credentials(user_email: str):
     """รับ credentials สำหรับการเข้าถึง Google Calendar API"""
     creds = None
@@ -101,6 +147,8 @@ def get_credentials(user_email: str):
             )
         except Exception as e:
             print(f"เกิดข้อผิดพลาดในการโหลด token: {str(e)}")
+
+    # ถ้าไม่มี token หรือไม่ valid → ต้องพิจารณา refresh หรือ auth ใหม่
 
     # ถ้าไม่มี token หรือไม่ valid → ต้องพิจารณา refresh หรือ auth ใหม่
     if not creds or not creds.valid:
