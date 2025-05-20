@@ -5,6 +5,7 @@ import sys
 import time as timeTest
 from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
+
 from urllib.parse import quote_plus, unquote_plus
 
 # 2. Third-party Library Imports
@@ -20,6 +21,10 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from typing import Dict, Optional
 
+from requests import request
+
+
+
 # 3. Local Application Imports
 # sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
@@ -29,7 +34,7 @@ from models.token_model import TokenResponse
 from utils.func import *
 from utils.token_db import *
 from utils.scheduler_instance import scheduler
-
+import httpx
 
 logging.basicConfig(level=logging.INFO)
 
@@ -105,6 +110,11 @@ def oauth2callback(code: str, state: str = None):
         
         # ตรวจสอบว่าอีเมลตรงกันหรือไม่
         if actual_email.lower() != expected_email.lower():
+            
+            response = httpx.get(f"{base_url}/events/{expected_email}")
+            event_data = response.json()
+            redirect_url = event_data.get("redirect_url", f"/events/{expected_email}")
+            
             return HTMLResponse(f"""
             <html>
                 <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
@@ -114,7 +124,7 @@ def oauth2callback(code: str, state: str = None):
                         <p>คุณกรอกอีเมล <strong>{expected_email}</strong> แต่ยืนยันตัวตนด้วย <strong>{actual_email}</strong></p>
                         <p>กรุณาลองใหม่โดยใช้อีเมลที่ตรงกัน</p>
                     </div>
-                    <a href="/events/{expected_email}" style="background-color: #007bff; color: white; padding: 10px 15px; text-decoration: none; border-radius: 4px;">ลองใหม่</a>
+                    <a href="{redirect_url}" style="background-color: #007bff; color: white; padding: 10px 15px; text-decoration: none; border-radius: 4px;">ลองใหม่</a>
                 </body>
             </html>
             """, status_code=400)
