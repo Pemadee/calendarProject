@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-
+from datetime import datetime, timezone, time, timedelta
 
 # 2. Third-Party Library Imports
 import pandas as pd
@@ -20,7 +20,6 @@ from googleapiclient.discovery import build
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from gspread_dataframe import get_as_dataframe
-
 
 # 3. Local Application Imports
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
@@ -627,3 +626,211 @@ def convert_to_iso_format(date, time):
 
 
 
+
+#========================================== fot API date, timeslot, pairs ======================================
+import asyncio
+async def fetch_user_events(email, name, user_type, time_min, time_max):
+    """
+    ดึงข้อมูลกิจกรรมของผู้ใช้จาก Google Calendar API แบบ async
+    Args:
+        email: อีเมลของผู้ใช้
+        name: ชื่อของผู้ใช้
+        user_type: ประเภทของผู้ใช้ ('M' หรือ 'R')
+        time_min: เวลาเริ่มต้นในการดึงข้อมูล
+        time_max: เวลาสิ้นสุดในการดึงข้อมูล
+    Returns:
+        tuple: (email, dict) หรือ (email, None) ถ้าเกิดข้อผิดพลาด
+    """
+    if not is_token_valid(email):
+        print(f"ผู้ใช้ {email} ยังไม่ได้ยืนยันตัวตน")
+        return email, None
+    
+    try:
+        token_entry = get_token(email)
+        creds = Credentials(
+            token=token_entry.access_token,
+            refresh_token=token_entry.refresh_token,
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=CLIENT_ID,
+            client_secret=CLIENT_SECRET,
+            scopes=SCOPES
+        )
+        
+        # ใช้ loop executor เพื่อทำ I/O bound task แบบ non-blocking
+        loop = asyncio.get_event_loop()
+        service = build('calendar', 'v3', credentials=creds)
+        
+        events_result = await loop.run_in_executor(
+            None,
+            lambda: service.events().list(
+                calendarId=email,
+                timeMin=time_min,
+                timeMax=time_max,
+                singleEvents=True,
+                orderBy='startTime'
+            ).execute()
+        )
+        
+        events = events_result.get('items', [])
+        return email, {
+            'name': name,
+            'events': events
+        }
+    except Exception as e:
+        print(f"เกิดข้อผิดพลาดในการดึงข้อมูลสำหรับ {user_type}: {email}: {str(e)}")
+        return email, None
+
+async def fetch_all_users_events(users_dict, time_min, time_max):
+    """
+    ดึงข้อมูลกิจกรรมของผู้ใช้ทั้งหมดแบบขนาน
+    Args:
+        users_dict: พจนานุกรมแยกประเภทของผู้ใช้ ('M' และ 'R')
+        time_min: เวลาเริ่มต้นในการดึงข้อมูล
+        time_max: เวลาสิ้นสุดในการดึงข้อมูล
+    Returns:
+        tuple: (dict, dict) เป็น (managers_events, recruiters_events)
+    """
+    start_time = timeTest.time()
+    
+    # สร้าง tasks สำหรับดึงข้อมูลทั้ง Manager และ Recruiter
+    all_tasks = []
+    
+    # เพิ่ม tasks ของ Manager
+    for user_info in users_dict['M']:
+        email = user_info["Email"]
+        name = user_info["Name"]
+        all_tasks.append(fetch_user_events(email, name, 'M', time_min, time_max))
+    
+    # เพิ่ม tasks ของ Recruiter
+    for user_info in users_dict['R']:
+        email = user_info["Email"]
+        name = user_info["Name"]
+        all_tasks.append(fetch_user_events(email, name, 'R', time_min, time_max))
+    
+    # รัน tasks ทั้งหมดพร้อมกันและรอผลลัพธ์
+    all_results = await asyncio.gather(*all_tasks)
+    
+    # แยกผลลัพธ์เป็น managers และ recruiters
+    managers_events = {}
+    recruiters_events = {}
+    
+    for email, data in all_results:
+        if data:  # กรองข้อมูลที่เป็น None ออก
+            if any(email == user_info["Email"] for user_info in users_dict['M']):
+                managers_events[email] = data
+            else:
+                recruiters_events[email] = data
+    
+    print(f"[LOG] Fetched all events in {timeTest.time() - start_time:.3f}s")
+    return managers_events, recruiters_events
+
+def is_available(events, start_time, end_time):
+    """
+    ตรวจสอบว่าช่วงเวลาที่ระบุว่างหรือไม่
+    Args:
+        events: รายการกิจกรรมของผู้ใช้
+        start_time: เวลาเริ่มต้นของช่วงเวลาที่ต้องการตรวจสอบ
+        end_time: เวลาสิ้นสุดของช่วงเวลาที่ต้องการตรวจสอบ
+    Returns:
+        bool: True หากว่าง, False หากไม่ว่าง
+    """
+    for event in events:
+        # ข้ามกิจกรรมที่ถูกยกเลิก
+        if event.get('status') == 'cancelled':
+            continue
+        
+        # ดึงเวลาเริ่มต้นและสิ้นสุดของกิจกรรม
+        event_start_str = event.get('start', {}).get('dateTime')
+        event_end_str = event.get('end', {}).get('dateTime')
+        
+        # ตรวจสอบว่าเป็นกิจกรรมที่มีช่วงเวลาหรือไม่
+        if not event_start_str or not event_end_str:
+            continue
+        
+        # แปลงเป็น datetime object
+        event_start = datetime.fromisoformat(event_start_str.replace('Z', '+00:00'))
+        event_end = datetime.fromisoformat(event_end_str.replace('Z', '+00:00'))
+        
+        # ตรวจสอบว่ามีการซ้อนทับกันหรือไม่
+        # กรณี 1: ช่วงเวลาที่ต้องการตรวจสอบอยู่ระหว่างกิจกรรม
+        # กรณี 2: กิจกรรมอยู่ระหว่างช่วงเวลาที่ต้องการตรวจสอบ
+        # กรณี 3: กิจกรรมเริ่มก่อนแต่สิ้นสุดหลังช่วงเวลาที่ต้องการตรวจสอบ
+        # กรณี 4: กิจกรรมเริ่มระหว่างแต่สิ้นสุดหลังช่วงเวลาที่ต้องการตรวจสอบ
+        if (start_time < event_end and end_time > event_start):
+            return False
+    
+    # หากไม่มีกิจกรรมที่ซ้อนทับกัน แสดงว่าว่าง
+    return True
+
+def create_thai_date_label(date_str):
+    """
+    สร้างป้ายชื่อวันที่ในรูปแบบไทย
+    Args:
+        date_str: วันที่ในรูปแบบ "YYYY-MM-DD"
+    Returns:
+        str: วันที่ในรูปแบบ "DD/MM/YYYY พ.ศ."
+    """
+    try:
+        date_obj = datetime.fromisoformat(date_str)
+        thai_year = date_obj.year + 543  # แปลงปี ค.ศ. เป็น พ.ศ.
+        return f"{date_obj.day}/{date_obj.month}/{thai_year}"
+    except ValueError:
+        return date_str
+
+def create_timeslot_range(date, start_hour=9, end_hour=18, interval_minutes=30):
+    """
+    สร้างช่วงเวลาทั้งหมดในวันที่กำหนด
+    Args:
+        date: วันที่ที่ต้องการสร้างช่วงเวลา (datetime.date)
+        start_hour: ชั่วโมงเริ่มต้น (default: 9)
+        end_hour: ชั่วโมงสิ้นสุด (ไม่รวม) (default: 18)
+        interval_minutes: ช่วงห่างเป็นนาที (default: 30)
+    Returns:
+        list: รายการ tuple ของ (slot_start, slot_end)
+    """
+    slots = []
+    for hour in range(start_hour, end_hour):
+        for minute in range(0, 60, interval_minutes):
+            slot_start = datetime.combine(date, time(hour, minute)).astimezone(timezone.utc)
+            slot_end = (slot_start + timedelta(minutes=interval_minutes)).astimezone(timezone.utc)
+            slots.append((slot_start, slot_end))
+    return slots
+
+def create_line_quick_reply_items(items_data, max_items=12, add_back_button=True):
+    """
+    สร้างปุ่ม quick reply สำหรับ LINE
+    Args:
+        items_data: รายการข้อมูลที่จะแสดงเป็นปุ่ม [(label, text), ...]
+        max_items: จำนวนปุ่มสูงสุด (default: 12)
+        add_back_button: เพิ่มปุ่มย้อนกลับหรือไม่ (default: True)
+    Returns:
+        list: รายการออบเจ็กต์ปุ่ม quick reply
+    """
+    items = []
+    
+    # จำกัดจำนวนปุ่ม
+    data_items = items_data[:max_items-1 if add_back_button else max_items]
+    
+    # เพิ่มปุ่มตามข้อมูล
+    for i, (label, text) in enumerate(data_items, start=1):
+        items.append({
+            "type": "action",
+            "action": {
+                "type": "message",
+                "label": label,
+                "text": text
+            }
+        })
+    
+    # เพิ่มปุ่มย้อนกลับ
+    if add_back_button:
+        items.append({
+            "type": "action",
+            "action": {
+                "type": "message",
+                "label": "ย้อนกลับ",
+                "text": "ย้อนกลับ"
+            }
+        })
+    
+    return items
