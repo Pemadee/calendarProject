@@ -1,10 +1,12 @@
 # 1. Standard Library Imports
+import asyncio
 import os
 import random
 import sys
 import time as timeTest
 from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
+
 from urllib.parse import quote_plus, unquote_plus
 
 # 2. Third-party Library Imports
@@ -20,6 +22,10 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from typing import Dict, Optional
 
+from requests import request
+
+
+
 # 3. Local Application Imports
 # sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
@@ -29,7 +35,7 @@ from models.token_model import TokenResponse
 from utils.func import *
 from utils.token_db import *
 from utils.scheduler_instance import scheduler
-
+import httpx
 
 logging.basicConfig(level=logging.INFO)
 
@@ -105,6 +111,11 @@ def oauth2callback(code: str, state: str = None):
         
         # ตรวจสอบว่าอีเมลตรงกันหรือไม่
         if actual_email.lower() != expected_email.lower():
+            
+            response = httpx.get(f"{base_url}/events/{expected_email}")
+            event_data = response.json()
+            redirect_url = event_data.get("redirect_url", f"/events/{expected_email}")
+            
             return HTMLResponse(f"""
             <html>
                 <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
@@ -114,7 +125,7 @@ def oauth2callback(code: str, state: str = None):
                         <p>คุณกรอกอีเมล <strong>{expected_email}</strong> แต่ยืนยันตัวตนด้วย <strong>{actual_email}</strong></p>
                         <p>กรุณาลองใหม่โดยใช้อีเมลที่ตรงกัน</p>
                     </div>
-                    <a href="/events/{expected_email}" style="background-color: #007bff; color: white; padding: 10px 15px; text-decoration: none; border-radius: 4px;">ลองใหม่</a>
+                    <a href="{redirect_url}" style="background-color: #007bff; color: white; padding: 10px 15px; text-decoration: none; border-radius: 4px;">ลองใหม่</a>
                 </body>
             </html>
             """, status_code=400)
@@ -892,28 +903,31 @@ def get_available_dates(request: LocationRequest):
     """
     start = timeTest.time()
     print(f"[START] API started at {start:.6f}")
+    
     # ใช้ฟังก์ชัน get_people เพื่อรับรายชื่ออีเมลผู้ใช้แยกตามประเภท M และ R
     t1 = timeTest.time()
     users_dict = get_people(
         location=request.location
     )
     print(f"[LOG] get_people done in {timeTest.time() - t1:.3f}s")
+    
     # กำหนดเวลาเริ่มต้นเป็นวันที่ปัจจุบันเสมอ
     start_datetime = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
     
-    # กำหนดช่วงเวลาในการดึงข้อมูล - ค้นหาไปข้างหน้าอีก 30 วัน เพื่อให้มีโอกาสเจอวันที่ว่างครบ 7 วัน
+    # กำหนดช่วงเวลาในการดึงข้อมูล - ค้นหาไปข้างหน้าอีก 20 วัน
     end_datetime = start_datetime + timedelta(days=20)
     
     time_min = start_datetime.strftime("%Y-%m-%dT%H:%M:%SZ")
     time_max = end_datetime.strftime("%Y-%m-%dT%H:%M:%SZ")
     
+    # สร้างรายการวันที่จะตรวจสอบ (ไม่รวมวันเสาร์-อาทิตย์)
+    t2 = timeTest.time()
     years_to_check = list(range(start_datetime.year, end_datetime.year + 1))
     THAI_HOLIDAYS = holidays.Thailand(years=years_to_check)
     
-    # สร้างรายการวันทำการที่จะตรวจสอบ (ไม่รวมวันเสาร์-อาทิตย์และวันหยุดนักขัตฤกษ์)
     date_list = []
     current_date = start_datetime.date()
-    t2 = timeTest.time()
+    
     while current_date <= end_datetime.date():
         is_weekend = current_date.weekday() >= 5  # เสาร์=5, อาทิตย์=6
         is_holiday = current_date in THAI_HOLIDAYS
@@ -972,6 +986,7 @@ def get_available_dates(request: LocationRequest):
     # ตรวจสอบวันที่มีเวลาว่าง
     available_dates = []
     t5 = timeTest.time()
+    
     for date in date_list:
         has_available_slot = False
         
@@ -1002,32 +1017,19 @@ def get_available_dates(request: LocationRequest):
             # หยุดการค้นหาเมื่อได้วันที่ว่างครบ 7 วัน
             if len(available_dates) >= 7:
                 break
+    
     print(f"[LOG] Matching available slots done in {timeTest.time() - t5:.3f}s")
+    
     # สร้างปุ่ม quick reply สำหรับวันที่ที่มีคู่ว่าง
-    items = []
-    for date_str in available_dates:
-        try:
-            date_obj = datetime.fromisoformat(date_str)
-            thai_year = date_obj.year + 543  # แปลงปี ค.ศ. เป็น พ.ศ.
-            thai_date = f"{date_obj.day}/{date_obj.month}/{thai_year}"
-            formatted_date = date_str 
-            items.append({
-                "type": "action",
-                "action": {
-                    "type": "message",
-                    "label": thai_date,
-                    "text": formatted_date
-                }
-            })
-        except ValueError:
-            pass
+    date_items = [(create_thai_date_label(date_str), date_str) for date_str in available_dates]
+    items = create_line_quick_reply_items(date_items, max_items=13, add_back_button=False)
     
     # สร้างข้อความ
     line_message = {
         "type": "text",
         "text": "กรุณาเลือกวันที่ต้องการนัดประชุม",
         "quickReply": {
-            "items": items[:13]  # จำกัดที่ 13 รายการตามข้อจำกัดของ Line
+            "items": items
         }
     }
     
@@ -1040,29 +1042,33 @@ def get_available_dates(request: LocationRequest):
     
     response = {
         "line_payload": [line_message],
-        "available_dates": available_dates  # เก็บข้อมูลเดิมด้วย
+        "available_dates": available_dates
     }
+    
     print(f"[DEBUG] API done at {timeTest.time() - start:.3f}s")
-    # ส่ง response กลับพร้อม header
+    
     return JSONResponse(
         content=response,
         headers={"Response-Type": "object"}
     )
+
 # API 2: ดึงช่วงเวลาและคู่ในวันที่เลือก
-@app.post("/events/available-timeslots")
-def get_available_timeslots(request: DateRequest):
+@app.post("/events/available-timeslots") 
+async def get_available_timeslots(request: DateRequest):
     """
     ดึงข้อมูลช่วงเวลาที่ว่างในวันที่ระบุ
     แสดงเฉพาะช่วงเวลาว่างในระหว่าง 09:00 - 18:00 โดยแบ่งเป็นช่วงละ 30 นาที
     """
     start = timeTest.time()
     print(f"[START] API started at {start:.6f}")
+    
     # ใช้ฟังก์ชัน get_people เพื่อรับรายชื่ออีเมลผู้ใช้แยกตามประเภท M และ R
     t1 = timeTest.time()
     users_dict = get_people(
         location=request.location
     )
     print(f"[LOG] get_people done in {timeTest.time() - t1:.3f}s")
+    
     # กำหนดวันที่จะตรวจสอบ
     date = datetime.fromisoformat(request.date).date()
     start_datetime = datetime.combine(date, time(0, 0, 0)).astimezone(timezone.utc)
@@ -1158,41 +1164,26 @@ def get_available_timeslots(request: DateRequest):
   
    # แปลงข้อมูลเพื่อสร้างข้อความและปุ่มสำหรับ LINE
     slot_texts = []
-    items = []
     
     # สร้างรูปแบบวันที่แบบไทย
-    date_obj = datetime.fromisoformat(request.date)
-    thai_year = date_obj.year + 543
-    selected_date = f"{date_obj.day}/{date_obj.month}/{thai_year}"
-
+    thai_date = create_thai_date_label(request.date)
+    
+    # เตรียมข้อมูลสำหรับปุ่ม quick reply
+    slot_items = []
     for i, slot in enumerate(available_timeslots[:12], start=1):
         time_slot = slot["time_slot"]
         pairs_text = "\n   " + "\n   ".join([f"👥{pair['pair']}" for pair in slot["available_recuiter"]])
         slot_text = f"{i}. เวลา {time_slot}{pairs_text}"
         slot_texts.append(slot_text)
         
-        # สร้างปุ่ม quick reply
-        items.append({
-            "type": "action",
-            "action": {
-                "type": "message",
-                "label": f"({i})",
-                "text": time_slot
-            }
-        })
+        # เพิ่มข้อมูลสำหรับปุ่ม
+        slot_items.append((f"({i})", time_slot))
     
-    # เพิ่มปุ่ม 'ย้อนกลับ'
-    items.append({
-        "type": "action",
-        "action": {
-            "type": "message",
-            "label": "ย้อนกลับ",
-            "text": "ย้อนกลับ"
-        }
-    })
+    # สร้างปุ่ม quick reply
+    items = create_line_quick_reply_items(slot_items, max_items=12, add_back_button=True)
     
     # สร้างข้อความ
-    message_text = f"กรุณาเลือกช่วงเวลาที่ต้องการ:\nวันที่ : {selected_date}\n" + "\n".join(slot_texts)
+    message_text = f"กรุณาเลือกช่วงเวลาที่ต้องการ:\nวันที่ : {thai_date}\n" + "\n".join(slot_texts)
     
     line_message = {
         "type": "text",
@@ -1207,20 +1198,24 @@ def get_available_timeslots(request: DateRequest):
         "date": request.date,
         "available_timeslots": available_timeslots
     }
+    
     print(f"[LOG] API done at {timeTest.time() - start:.3f}s")
+    
     return JSONResponse(
         content=response,
         headers={"Response-Type": "object"}
     )
+
 # API 3: ดึงรายละเอียดของคู่ที่ว่างในช่วงเวลาที่เลือก
 @app.post("/events/available-pairs")
-def get_available_pairs(request: TimeSlotRequest):
+async def get_available_pairs(request: TimeSlotRequest):
     """
     ดึงข้อมูลคู่ที่ว่างในช่วงเวลาที่ระบุ
     แสดงรายละเอียดของ manager และ recruiter ที่ว่างในช่วงเวลานั้น
     """
     start = timeTest.time()
     print(f"[START] API started at {start:.6f}")
+    
     # ใช้ฟังก์ชัน get_people เพื่อรับรายชื่ออีเมลผู้ใช้แยกตามประเภท M และ R
     t1 = timeTest.time()
     users_dict = get_people(
@@ -1230,6 +1225,7 @@ def get_available_pairs(request: TimeSlotRequest):
         age_key=request.age_key
     )
     print(f"[LOG] get_people done in {timeTest.time() - t1:.3f}s")
+    
     # แยกเวลาเริ่มต้นและสิ้นสุดจาก time_slot
     time_parts = request.time_slot.split("-")
     start_time_str = time_parts[0]
@@ -1249,92 +1245,14 @@ def get_available_pairs(request: TimeSlotRequest):
     
     time_min = start_datetime.strftime("%Y-%m-%dT%H:%M:%SZ")
     time_max = end_datetime.strftime("%Y-%m-%dT%H:%M:%SZ")
-    t2 = timeTest.time()
-    # ดึงข้อมูลกิจกรรมสำหรับ Manager และ Recruiter
-    managers_events = {}
-    for user_info in users_dict['M']:
-        email = user_info["Email"]
-        name = user_info["Name"]
-        calendar_id = email
-        
-        if is_token_valid(email):
-            try:
-                # ดึง token จาก DB
-                token_entry = get_token(email)
-                creds = Credentials(
-                    token=token_entry.access_token,
-                    refresh_token=token_entry.refresh_token,
-                    token_uri="https://oauth2.googleapis.com/token",
-                    client_id=CLIENT_ID,
-                    client_secret=CLIENT_SECRET,
-                    scopes=SCOPES
-                )
-                service = build('calendar', 'v3', credentials=creds)
-                
-                events_result = service.events().list(
-                    calendarId=calendar_id,
-                    timeMin=time_min,
-                    timeMax=time_max,
-                    singleEvents=True,
-                    orderBy='startTime'
-                ).execute()
-                
-                events = events_result.get('items', [])
-                
-                # เก็บข้อมูลกิจกรรม
-                managers_events[email] = {
-                    'name': name,
-                    'events': events
-                }
-            except Exception as e:
-                print(f"เกิดข้อผิดพลาดในการดึงข้อมูลสำหรับ M: {email}: {str(e)}")
-        else:
-            print(f"ผู้ใช้ {email} ยังไม่ได้ยืนยันตัวตน")
-    print(f"[LOG] get_managers_events done in {timeTest.time() - t2:.3f}s")
-    t3 = timeTest.time()
-    recruiters_events = {}
-    for user_info in users_dict['R']:
-        email = user_info["Email"]
-        name = user_info["Name"]
-        calendar_id = email
-        
-        if is_token_valid(email):
-            try:
-                # ดึง token จาก DB
-                token_entry = get_token(email)
-                creds = Credentials(
-                    token=token_entry.access_token,
-                    refresh_token=token_entry.refresh_token,
-                    token_uri="https://oauth2.googleapis.com/token",
-                    client_id=CLIENT_ID,
-                    client_secret=CLIENT_SECRET,
-                    scopes=SCOPES
-                )
-                service = build('calendar', 'v3', credentials=creds)
-                
-                events_result = service.events().list(
-                    calendarId=calendar_id,
-                    timeMin=time_min,
-                    timeMax=time_max,
-                    singleEvents=True,
-                    orderBy='startTime'
-                ).execute()
-                
-                events = events_result.get('items', [])
-                
-                # เก็บข้อมูลกิจกรรม
-                recruiters_events[email] = {
-                    'name': name,
-                    'events': events
-                }
-            except Exception as e:
-                print(f"เกิดข้อผิดพลาดในการดึงข้อมูลสำหรับ R: {email}: {str(e)}")
-        else:
-            print(f"ผู้ใช้ {email} ยังไม่ได้ยืนยันตัวตน")
-    print(f"[LOG] get_recruiters_events done in {timeTest.time() - t3:.3f}s")
+    
+    # ดึงข้อมูลกิจกรรมแบบขนาน
+    managers_events, recruiters_events = await fetch_all_users_events(users_dict, time_min, time_max)
+    
     # เก็บคู่ที่ว่างในช่วงเวลาที่ระบุ
     available_pairs = []
     t4 = timeTest.time()
+    
     for manager_email, manager_data in managers_events.items():
         manager_name = manager_data['name']
         manager_events = manager_data['events']
@@ -1359,35 +1277,24 @@ def get_available_pairs(request: TimeSlotRequest):
                         "name": recruiter_name
                     }
                 })
+                
     print(f"[LOG] get_available_pairs done in {timeTest.time() - t4:.3f}s")
+    
     # สร้างข้อความและตัวเลือกในรูปแบบ LINE Message
     message_text = f"กรุณาเลือก Manager-Recruiter ที่จะนัด\nเวลา {request.time_slot}\n"
-    items = []
     
+    # เตรียมข้อมูลสำหรับปุ่ม quick reply
+    pair_items = []
     for i, pair_detail in enumerate(available_pairs, start=1):
-        pairs = pair_detail["pair"]
-        message_text += f"   {i}.👥 {pair_detail['pair']}\n"
+        pair_name = pair_detail["pair"]
+        message_text += f"   {i}.👥 {pair_name}\n"
         
-        # สร้างปุ่ม quick reply (สูงสุด 12 รายการเพื่อเหลือที่สำหรับปุ่มย้อนกลับ)
-        if i < 13:
-            items.append({
-                "type": "action",
-                "action": {
-                    "type": "message",
-                    "label": f"({i})",
-                    "text": pairs
-                }
-            })
+        # เพิ่มข้อมูลสำหรับปุ่ม
+        if i < 13:  # จำกัดที่ 12 รายการ + ปุ่มย้อนกลับ
+            pair_items.append((f"({i})", pair_name))
     
-    # เพิ่มปุ่มย้อนกลับ
-    items.append({
-        "type": "action",
-        "action": {
-            "type": "message",
-            "label": "ย้อนกลับ",
-            "text": "ย้อนกลับ"
-        }
-    })
+    # สร้างปุ่ม quick reply
+    items = create_line_quick_reply_items(pair_items, max_items=12, add_back_button=True)
     
     line_message = {
         "type": "text",
@@ -1397,7 +1304,7 @@ def get_available_pairs(request: TimeSlotRequest):
         }
     }
     
-   # สร้าง response ในรูปแบบของ LINE Payload
+    # สร้าง response ในรูปแบบของ LINE Payload
     response = {
         "line_payload": [line_message],
         "date": request.date,
@@ -1405,12 +1312,13 @@ def get_available_pairs(request: TimeSlotRequest):
         "available_pairs": available_pairs
     }
     
-    print(response)
     print(f"[LOG] API done in {timeTest.time() - start:.3f}s")
+    
     return JSONResponse(
         content=response,
         headers={"Response-Type": "object"}
     )
+
 #book calendar
 @app.post("/events/create-bulk")
 def create_bulk_events(event_request: BulkEventRequest):
@@ -1667,6 +1575,7 @@ def create_bulk_events(event_request: BulkEventRequest):
             },
             headers={"Response-Type": "object"}
         )
+
 #login
 @app.get("/events/{user_email}")
 def get_user_events(
@@ -1882,7 +1791,7 @@ def test(request: LocationRequest):
     getPeople = get_people(location=request.location)
     return getPeople
 
-# ======================== ส่วนที่เกี่ยวกับ DB ========================================
+# ======================== ส่วนที่เกี่ยวกับ DB ==================================================================
 @app.get("/auto-refresh")
 def trigger_auto_refresh():
     """เรียกใช้ auto_refresh_tokens เพื่อทดสอบทันที"""
@@ -2001,6 +1910,3 @@ async def auth_redirect(request: Request, auth_url: str, email: str = None):
             "email": email
         }
     )
-
-
-
