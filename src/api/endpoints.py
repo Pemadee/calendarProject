@@ -1196,7 +1196,8 @@ async def get_available_timeslots(request: DateRequest):
     response = {
         "line_payload": [line_message],
         "date": request.date,
-        "recruiter": f"{recruiter_name}"
+        "recruiter": f"{recruiter_name}",
+        "email_recruiter": f"{recruiter_email}"
     }
     
     print(f"[LOG] API done at {timeTest.time() - start:.3f}s")
