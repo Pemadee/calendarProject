@@ -1,0 +1,16 @@
+fastapi
+uvicorn
+sqlalchemy
+pydantic
+google-auth
+google-auth-oauthlib
+google-api-python-client
+gspread
+gspread-dataframe
+oauth2client
+apscheduler
+python-dotenv
+pandas
+holidays
+jinja2
+httpx
