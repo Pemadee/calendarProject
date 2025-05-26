@@ -885,7 +885,7 @@ def get_available_time_slots(request: ManagerRecruiter):
 #================================================API appointment =============================================
 # API 1: ดึงวัน
 @app.post("/events/available-dates")
-def get_available_dates(request: ManagerRecruiter2):
+def get_available_dates(request: LocationRequest):
     """
     ดึงข้อมูลวันที่มีเวลาว่างตรงกันระหว่าง Manager และ Recruiter
     แสดงวันที่มีคู่ว่างให้ครบ 7 วัน โดยเว้นวันเสาร์-อาทิตย์
@@ -895,10 +895,7 @@ def get_available_dates(request: ManagerRecruiter2):
     # ใช้ฟังก์ชัน get_people เพื่อรับรายชื่ออีเมลผู้ใช้แยกตามประเภท M และ R
     t1 = timeTest.time()
     users_dict = get_people(
-        location=request.location,
-        english_min=request.english_min,
-        exp_kind=request.exp_kind,
-        age_key=request.age_key
+        location=request.location
     )
     print(f"[LOG] get_people done in {timeTest.time() - t1:.3f}s")
     # กำหนดเวลาเริ่มต้นเป็นวันที่ปัจจุบันเสมอ
@@ -929,50 +926,8 @@ def get_available_dates(request: ManagerRecruiter2):
         
         current_date += timedelta(days=1)
     print(f"[LOG] building date_list done in {timeTest.time() - t2:.3f}s")
-    # ดึงข้อมูลกิจกรรมสำหรับ Manager และ Recruiter
-    managers_events = {}
-    t3 = timeTest.time()
-    for user_info in users_dict['M']:
-        email = user_info["Email"]
-        name = user_info["Name"]
-        calendar_id = email
-        
-        if is_token_valid(email):
-            try:
-                
-                # ดึง token จาก DB
-                token_entry = get_token(email)
-                creds = Credentials(
-                    token=token_entry.access_token,
-                    refresh_token=token_entry.refresh_token,
-                    token_uri="https://oauth2.googleapis.com/token",
-                    client_id=CLIENT_ID,
-                    client_secret=CLIENT_SECRET,
-                    scopes=SCOPES
-                )
-                service = build('calendar', 'v3', credentials=creds)
-                
-                events_result = service.events().list(
-                    calendarId=calendar_id,
-                    timeMin=time_min,
-                    timeMax=time_max,
-                    singleEvents=True,
-                    orderBy='startTime'
-                ).execute()
-                
-                events = events_result.get('items', [])
-                
-                # เก็บข้อมูลกิจกรรม
-                managers_events[email] = {
-                    'name': name,
-                    'events': events
-                }
-            except Exception as e:
-                print(f"เกิดข้อผิดพลาดในการดึงข้อมูลสำหรับ M: {email}: {str(e)}")
-        else:
-            print(f"ผู้ใช้ {email} ยังไม่ได้ยืนยันตัวตน")
-    print(f"[LOG] Fetched all Manager events in {timeTest.time() - t3:.3f}s")
-    
+    # ดึงข้อมูลกิจกรรมสำหรับ Recruiter
+
     recruiters_events = {}
     t4 = timeTest.time()
     for user_info in users_dict['R']:
@@ -991,7 +946,7 @@ def get_available_dates(request: ManagerRecruiter2):
                     client_secret=CLIENT_SECRET,
                     scopes=SCOPES
                 )
-                events = events_result.get('items', [])
+                
                 service = build('calendar', 'v3', credentials=creds)
                 
                 events_result = service.events().list(
@@ -1027,22 +982,16 @@ def get_available_dates(request: ManagerRecruiter2):
                 slot_end = (slot_start + timedelta(minutes=30)).astimezone(timezone.utc)
                 
                 # ตรวจสอบว่ามีคู่ที่ว่างหรือไม่
-                for manager_email, manager_data in managers_events.items():
-                    if has_available_slot:
-                        break
-                        
-                    manager_events = manager_data['events']
+                for recruiter_email, recruiter_data in recruiters_events.items():
+                    recruiter_events = recruiter_data['events']
                     
-                    for recruiter_email, recruiter_data in recruiters_events.items():
-                        recruiter_events = recruiter_data['events']
+                    # ตรวจสอบว่าทั้งคู่ว่างหรือไม่
+                    recruiter_is_available = is_available(recruiter_events, slot_start, slot_end)
+                                       
+                    if recruiter_is_available:
+                        has_available_slot = True
                         
-                        # ตรวจสอบว่าทั้งคู่ว่างหรือไม่
-                        manager_is_available = is_available(manager_events, slot_start, slot_end)
-                        recruiter_is_available = is_available(recruiter_events, slot_start, slot_end)
-                        
-                        if manager_is_available and recruiter_is_available:
-                            has_available_slot = True
-                            break
+                        break
                 
                 if has_available_slot:
                     break
@@ -1111,10 +1060,7 @@ def get_available_timeslots(request: DateRequest):
     # ใช้ฟังก์ชัน get_people เพื่อรับรายชื่ออีเมลผู้ใช้แยกตามประเภท M และ R
     t1 = timeTest.time()
     users_dict = get_people(
-        location=request.location,
-        english_min=request.english_min,
-        exp_kind=request.exp_kind,
-        age_key=request.age_key
+        location=request.location
     )
     print(f"[LOG] get_people done in {timeTest.time() - t1:.3f}s")
     # กำหนดวันที่จะตรวจสอบ
@@ -1125,49 +1071,8 @@ def get_available_timeslots(request: DateRequest):
     time_min = start_datetime.strftime("%Y-%m-%dT%H:%M:%SZ")
     time_max = end_datetime.strftime("%Y-%m-%dT%H:%M:%SZ")
     
-    # ดึงข้อมูลกิจกรรมสำหรับ Manager และ Recruiter
-    t2 = timeTest.time()
-    managers_events = {}
-    for user_info in users_dict['M']:
-        email = user_info["Email"]
-        name = user_info["Name"]
-        calendar_id = email
-        
-        if is_token_valid(email):
-            try:
-                # ดึง token จาก DB
-                token_entry = get_token(email)
-                creds = Credentials(
-                    token=token_entry.access_token,
-                    refresh_token=token_entry.refresh_token,
-                    token_uri="https://oauth2.googleapis.com/token",
-                    client_id=CLIENT_ID,
-                    client_secret=CLIENT_SECRET,
-                    scopes=SCOPES
-                )
-                service = build('calendar', 'v3', credentials=creds)
-                
-                events_result = service.events().list(
-                    calendarId=calendar_id,
-                    timeMin=time_min,
-                    timeMax=time_max,
-                    singleEvents=True,
-                    orderBy='startTime'
-                ).execute()
-                
-                events = events_result.get('items', [])
-                
-                # เก็บข้อมูลกิจกรรม
-                managers_events[email] = {
-                    'name': name,
-                    'events': events
-                }
-            except Exception as e:
-                print(f"เกิดข้อผิดพลาดในการดึงข้อมูลสำหรับ M: {email}: {str(e)}")
-        else:
-            print(f"ผู้ใช้ {email} ยังไม่ได้ยืนยันตัวตน")
-    print(f"[LOG] get_managers_events done in {timeTest.time() - t2:.3f}s")
-    
+    # ดึงข้อมูลกิจกรรมสำหรับ Recruiter
+ 
     t3 = timeTest.time()
     recruiters_events = {}
     for user_info in users_dict['R']:
@@ -1211,7 +1116,7 @@ def get_available_timeslots(request: DateRequest):
     print(f"[LOG] get_recruiters_events done in {timeTest.time() - t3:.3f}s")
     # เก็บช่วงเวลาว่างและนับจำนวนคู่ที่ว่าง
     available_timeslots = []
-    
+    random_recruiter = random.choice(list(recruiters_events.items()))
     # สร้างช่วงเวลาทุกๆ 30 นาที
     t4 = timeTest.time()
     for hour in range(9, 18):
@@ -1225,38 +1130,32 @@ def get_available_timeslots(request: DateRequest):
             time_slot_key = f"{local_start}-{local_end}"
             
             # ตรวจสอบคู่ที่ว่าง
-            available_pairs_count = 0
-            available_pairs = []
+            available_recuiter_count = 0
+            available_recuiter = []
             
-            for manager_email, manager_data in managers_events.items():
-                manager_events = manager_data['events']
-                manager_name = manager_data['name']
+            for recruiter_email, recruiter_data in [random_recruiter]:
+                recruiter_events = recruiter_data['events']
+                recruiter_name = recruiter_data['name']
                 
-                for recruiter_email, recruiter_data in recruiters_events.items():
-                    recruiter_events = recruiter_data['events']
-                    recruiter_name = recruiter_data['name']
-                    
-                    # ตรวจสอบว่าทั้งคู่ว่างหรือไม่
-                    manager_is_available = is_available(manager_events, slot_start, slot_end)
-                    recruiter_is_available = is_available(recruiter_events, slot_start, slot_end)
-                    
-                    if manager_is_available and recruiter_is_available:
-                        available_pairs_count += 1
-                        # เพิ่มข้อมูลคู่ที่ว่าง
-                        available_pairs.append({
-                            "pair": f"{manager_name}-{recruiter_name}"
-                        })
+                # ตรวจสอบว่าทั้งคู่ว่างหรือไม่
+                recruiter_is_available = is_available(recruiter_events, slot_start, slot_end)
+                
+                if recruiter_is_available:
+                    available_recuiter_count += 1
+                    # เพิ่มข้อมูลคู่ที่ว่าง
+                    available_recuiter.append({
+                        "pair": f"-{recruiter_name}"
+                    })
             
             # เก็บข้อมูลช่วงเวลาที่มีคู่ว่างอย่างน้อย 1 คู่
-            if available_pairs_count > 0:
+            if available_recuiter_count > 0:
                 available_timeslots.append({
                     "time_slot": time_slot_key,
-                    "available_pairs_count": available_pairs_count,
-                    "available_pairs": available_pairs
+                    "available_recuiter_count": available_recuiter_count,
+                    "available_recuiter": available_recuiter
                 })
     print(f"[LOG] find_available_time_slots done in {timeTest.time() - t4:.3f}s")            
-    print("อ่ะ ตรงนี้ๆๆ")
-    print(available_timeslots)    
+  
    # แปลงข้อมูลเพื่อสร้างข้อความและปุ่มสำหรับ LINE
     slot_texts = []
     items = []
@@ -1268,7 +1167,7 @@ def get_available_timeslots(request: DateRequest):
 
     for i, slot in enumerate(available_timeslots[:12], start=1):
         time_slot = slot["time_slot"]
-        pairs_text = "\n   " + "\n   ".join([f"👥{pair['pair']}" for pair in slot["available_pairs"]])
+        pairs_text = "\n   " + "\n   ".join([f"👥{pair['pair']}" for pair in slot["available_recuiter"]])
         slot_text = f"{i}. เวลา {time_slot}{pairs_text}"
         slot_texts.append(slot_text)
         
@@ -1774,8 +1673,7 @@ def get_user_events(
     user_email: str, 
     calendar_id: str = "primary",
     start_date: Optional[str] = None, 
-    end_date: Optional[str] = None
-):
+    end_date: Optional[str] = None):
     """ดึงข้อมูลกิจกรรมของผู้ใช้คนเดียว และยืนยันตัวตนหากจำเป็น"""
     # ดึงข้อมูลและยืนยันตัวตนถ้าจำเป็น
     creds_result = get_credentials(user_email)
@@ -1979,6 +1877,10 @@ def get_user_events(
 # =========================================================================================================
 
 
+@app.post("/test")
+def test(request: LocationRequest):
+    getPeople = get_people(location=request.location)
+    return getPeople
 
 # ======================== ส่วนที่เกี่ยวกับ DB ========================================
 @app.get("/auto-refresh")
