@@ -16,7 +16,6 @@ class UsersRequest(BaseModel):
     start_time: Optional[str] = None  # เช่น "18:30:00"
     end_time: Optional[str] = None    # เช่น "19:00:00"
 
-
 class BulkEventRequest(BaseModel):
     name_pair: str  # รับในรูปแบบ "name1-name2"
     location: str   # เช่น "Silom", "Asoke" เป็นต้น
@@ -63,9 +62,7 @@ class ManagerRecruiter2(BaseModel):
 class DateRequest(BaseModel):
     date: str
     location: str
-    english_min: float
-    exp_kind: str
-    age_key: str
+
 
 class TimeSlotRequest(BaseModel):
     date: str
@@ -74,3 +71,9 @@ class TimeSlotRequest(BaseModel):
     english_min: float
     exp_kind: str
     age_key: str
+
+class LocationRequest(BaseModel):
+    location: str
+
+
+
