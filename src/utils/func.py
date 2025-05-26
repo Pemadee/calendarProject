@@ -559,6 +559,84 @@ def convert_to_iso_format(date, time):
 
 
 
+def find_email_from_name(name, location):
+    """
+    รับชื่อเดียวและ location เพื่อค้นหาอีเมลจาก Excel
+    
+    Args:
+        name (str): ชื่อที่ต้องการค้นหา
+        location (str): สถานที่ เช่น "Silom", "Asoke" เป็นต้น
+        
+    Returns:
+        dict: ข้อมูลอีเมลที่ค้นพบ ประกอบด้วย name_email, name
+    """
+    # อ่านไฟล์ Excel
+    try:
+        # ปรับ path ตามที่เก็บไฟล์จริง
+        
+        sheet = client.open_by_key(spreadsheet_id)
+        worksheet_M = sheet.worksheet('M')
+        worksheet_R = sheet.worksheet('R')
+        
+        df_m = get_as_dataframe(worksheet_M, evaluate_formulas=True, skiprows=0)
+        df_r = get_as_dataframe(worksheet_R, evaluate_formulas=True, skiprows=0)
+        
+        # ค้นหาในชีต M ก่อน
+        email = None
+        found_in_sheet = None
+        
+        for i in range(len(df_m)):
+            # ตรวจสอบว่าเป็นหัวข้อ location ที่ต้องการหรือไม่
+            if df_m.iloc[i, 0] == location:
+                # ค้นหาในแถวถัดๆ ไปจนกว่าจะเจอ location ถัดไป
+                j = i + 1
+                while j < len(df_m) and not pd.isna(df_m.iloc[j, 0]) and not df_m.iloc[j, 0] in ["Silom", "Asoke", "Phuket", "Pattaya", "Samui", "Huahin", "Chiangmai"]:
+                    if df_m.iloc[j, 0] == name:
+                        # พบชื่อที่ต้องการ ค้นหาอีเมลในคอลัมน์ Email
+                        if 'Email' in df_m.columns:
+                            email_col_idx = df_m.columns.get_loc('Email')
+                            email = df_m.iloc[j, email_col_idx]
+                            if pd.isna(email):
+                                raise ValueError(f"พบชื่อ {name} แล้ว แต่ไม่มีข้อมูลอีเมล")
+                            found_in_sheet = 'M'
+                            break
+                    j += 1
+                break
+        
+        # ถ้าไม่เจอในชีต M ให้ค้นหาในชีต R
+        if email is None:
+            for i in range(len(df_r)):
+                # ตรวจสอบว่าเป็นหัวข้อ location ที่ต้องการหรือไม่
+                if df_r.iloc[i, 0] == location:
+                    # ค้นหาในแถวถัดๆ ไปจนกว่าจะเจอ location ถัดไป
+                    j = i + 1
+                    while j < len(df_r) and not pd.isna(df_r.iloc[j, 0]) and not df_r.iloc[j, 0] in ["Silom", "Asoke", "Phuket", "Pattaya", "Samui", "Huahin", "Chiangmai"]:
+                        if df_r.iloc[j, 0] == name:
+                            # พบชื่อที่ต้องการ ค้นหาอีเมลในคอลัมน์ Email
+                            if 'Email' in df_r.columns:
+                                email_col_idx = df_r.columns.get_loc('Email')
+                                email = df_r.iloc[j, email_col_idx]
+                                if pd.isna(email):
+                                    raise ValueError(f"พบชื่อ {name} แล้ว แต่ไม่มีข้อมูลอีเมล")
+                                found_in_sheet = 'R'
+                                break
+                        j += 1
+                    break
+        
+        if email is None:
+            raise ValueError(f"ไม่พบอีเมลสำหรับชื่อ {name} ในพื้นที่ {location}")
+        
+        # คืนค่าเป็น dict ที่มีข้อมูลที่ต้องการ
+        return {
+            "name_email": email,
+            "name": name,
+            "found_in_sheet": found_in_sheet  # เพิ่มข้อมูลว่าพบในชีตไหน (อาจมีประโยชน์)
+        }
+        
+    except Exception as e:
+        raise Exception(f"เกิดข้อผิดพลาดในการอ่านข้อมูลจาก Excel: {str(e)}")
+
+
 #========================================== fot API date, timeslot, pairs ======================================
 import asyncio
 async def fetch_user_events(email, name, user_type, time_min, time_max):

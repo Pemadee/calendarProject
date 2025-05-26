@@ -1150,7 +1150,7 @@ async def get_available_timeslots(request: DateRequest):
                     available_recuiter_count += 1
                     # เพิ่มข้อมูลคู่ที่ว่าง
                     available_recuiter.append({
-                        "pair": f"-{recruiter_name}"
+                        "recruiter": f"{recruiter_name}"
                     })
             
             # เก็บข้อมูลช่วงเวลาที่มีคู่ว่างอย่างน้อย 1 คู่
@@ -1172,8 +1172,8 @@ async def get_available_timeslots(request: DateRequest):
     slot_items = []
     for i, slot in enumerate(available_timeslots[:12], start=1):
         time_slot = slot["time_slot"]
-        pairs_text = "\n   " + "\n   ".join([f"👥{pair['pair']}" for pair in slot["available_recuiter"]])
-        slot_text = f"{i}. เวลา {time_slot}{pairs_text}"
+        # pairs_text = "\n   " + "\n   ".join([f"👥{pair['pair']}" for pair in slot["available_recuiter"]])
+        slot_text = f"{i}. เวลา {time_slot}"
         slot_texts.append(slot_text)
         
         # เพิ่มข้อมูลสำหรับปุ่ม
@@ -1196,7 +1196,7 @@ async def get_available_timeslots(request: DateRequest):
     response = {
         "line_payload": [line_message],
         "date": request.date,
-        "available_timeslots": available_timeslots
+        "recruiter": f"{recruiter_name}"
     }
     
     print(f"[LOG] API done at {timeTest.time() - start:.3f}s")
@@ -1319,10 +1319,9 @@ async def get_available_pairs(request: TimeSlotRequest):
         headers={"Response-Type": "object"}
     )
 
-#book calendar
 @app.post("/events/create-bulk")
 def create_bulk_events(event_request: BulkEventRequest):
-    """สร้างการนัดหมายโดยใช้ name1 เป็น organizer และเพิ่ม name2 เป็นผู้เข้าร่วม"""
+    """สร้างการนัดหมายโดยใช้ name2 เป็น organizer"""
     start = timeTest.time()
     try:
         # แปลงเวลาให้เป็นรูปแบบ ISO
@@ -1342,107 +1341,72 @@ def create_bulk_events(event_request: BulkEventRequest):
             )
         
         # ค้นหาอีเมลจากชื่อและพื้นที่
-        email_info = find_emails_from_name_pair(event_request.name_pair, event_request.location)
+        email_info = find_email_from_name(event_request.name, event_request.location)
         
         # เข้าถึงข้อมูลโดยตรงจาก dict
-        name1_email = email_info["name1_email"]
-        name1 = email_info["name1"]
-        name2_email = email_info["name2_email"]
-        name2 = email_info["name2"]
+        user_email = email_info["name_email"]
+        user_name = email_info["name"]
         
-        # ตรวจสอบว่าผู้ใช้ทั้งสองคนได้ยืนยันตัวตนแล้วหรือไม่
+        # ตรวจสอบว่าผู้ใช้ได้ยืนยันตัวตนแล้วหรือไม่
         invalid_users = []
-        if not is_token_valid(name1_email):
-            invalid_users.append(name1_email)
-        if not is_token_valid(name2_email):
-            invalid_users.append(name2_email)
+        if not is_token_valid(user_email):
+            invalid_users.append(user_email)
                 
         if invalid_users:
-            # สร้าง Line Response สำหรับกรณีที่มีผู้ใช้ยังไม่ได้ยืนยันตัวตน
+            # สร้าง Line Response สำหรับกรณีที่ผู้ใช้ยังไม่ได้ยืนยันตัวตน
             line_response = {
                 "type": "text",
-                "text": "ไม่สามารถสร้างการนัดหมายได้ เนื่องจากมีผู้ใช้บางคนยังไม่ได้ยืนยันตัวตน"
+                "text": "ไม่สามารถสร้างการนัดหมายได้ เนื่องจากผู้ใช้ยังไม่ได้ยืนยันตัวตน"
             }
             
             return JSONResponse(
                 content={
-                    "message": "ผู้ใช้บางคนยังไม่ได้ยืนยันตัวตน",
+                    "message": "ผู้ใช้ยังไม่ได้ยืนยันตัวตน",
                     "invalid_users": invalid_users,
                     "line_payload": [line_response]
                 },
                 headers={"Response-Type": "object"}
             )
             
-        # รับ credentials ของ name1
-        token_entry1 = get_token(name1_email)
-        creds1 = Credentials(
-            token=token_entry1.access_token,
-            refresh_token=token_entry1.refresh_token,
+        # รับ credentials ของ user
+        token_entry = get_token(user_email)
+        creds = Credentials(
+            token=token_entry.access_token,
+            refresh_token=token_entry.refresh_token,
             token_uri="https://oauth2.googleapis.com/token",
             client_id=CLIENT_ID,
             client_secret=CLIENT_SECRET,
             scopes=SCOPES
         )
         
-        # สร้าง service สำหรับ name1
-        service1 = build('calendar', 'v3', credentials=creds1)
+        # สร้าง service สำหรับ user
+        service = build('calendar', 'v3', credentials=creds)
         
         # ตรวจสอบว่ามีกิจกรรมซ้ำซ้อนในช่วงเวลาเดียวกันหรือไม่
         time_min = start_time
         time_max = end_time
         
-        # ตรวจสอบปฏิทินของ name1
-        events_result1 = service1.events().list(
+        # ตรวจสอบปฏิทินของ user
+        events_result = service.events().list(
             calendarId='primary',
             timeMin=time_min,
             timeMax=time_max,
             singleEvents=True,
             orderBy='startTime'
         ).execute()
-        events1 = events_result1.get('items', [])
-        
-        # ตรวจสอบปฏิทินของ name2
-        if is_token_valid(name2_email):
-            token_entry2 = get_token(name2_email)
-            creds2 = Credentials(
-                token=token_entry2.access_token,
-                refresh_token=token_entry2.refresh_token,
-                token_uri="https://oauth2.googleapis.com/token",
-                client_id=CLIENT_ID,
-                client_secret=CLIENT_SECRET,
-                scopes=SCOPES
-            )
-            service2 = build('calendar', 'v3', credentials=creds2)
-            events_result2 = service2.events().list(
-                calendarId='primary',
-                timeMin=time_min,
-                timeMax=time_max,
-                singleEvents=True,
-                orderBy='startTime'
-            ).execute()
-            events2 = events_result2.get('items', [])
-        else:
-            events2 = []
+        events = events_result.get('items', [])
         
         # ถ้ามีกิจกรรมในช่วงเวลาเดียวกัน ให้แจ้งเตือนและยกเลิกการสร้างนัดหมาย
-        if events1 or events2:
+        if events:
             conflict_events = []
             
             # รวบรวมรายการกิจกรรมที่ซ้ำซ้อน
-            for event in events1:
+            for event in events:
                 conflict_events.append({
                     'title': event.get('summary', 'ไม่มีชื่อ'),
                     'start': event.get('start', {}).get('dateTime', ''),
                     'end': event.get('end', {}).get('dateTime', ''),
-                    'calendar_owner': name1
-                })
-            
-            for event in events2:
-                conflict_events.append({
-                    'title': event.get('summary', 'ไม่มีชื่อ'),
-                    'start': event.get('start', {}).get('dateTime', ''),
-                    'end': event.get('end', {}).get('dateTime', ''),
-                    'calendar_owner': name2
+                    'calendar_owner': user_name
                 })
             
             # สร้าง Line Response สำหรับกรณีที่มีกิจกรรมซ้ำซ้อน
@@ -1466,7 +1430,7 @@ def create_bulk_events(event_request: BulkEventRequest):
             additional_attendees = [{'email': email} for email in event_request.attendees]
         
         # กำหนดชื่อหัวข้อตามรูปแบบที่ต้องการ
-        event_summary = f"Onsite Interview : K. {name2} - {event_request.location}"
+        event_summary = f"Onsite Interview : K. {user_name} - {event_request.location}"
         
         # เตรียมข้อมูลกิจกรรม
         event_data = {
@@ -1494,26 +1458,24 @@ def create_bulk_events(event_request: BulkEventRequest):
         # ผลลัพธ์การดำเนินการ
         results = []
         
-        # สร้างการนัดหมายเพียงครั้งเดียวโดยใช้ name1 เป็น organizer
+        # สร้างการนัดหมายโดยใช้ user เป็น organizer
         try:
-            # เพิ่มทั้ง name1 และ name2 เป็นผู้เข้าร่วม (แม้ว่า name1 จะเป็น organizer)
-            # ซึ่งจะช่วยให้แสดงรายชื่อในส่วนของผู้เข้าร่วมอย่างชัดเจน
+            # user เป็น organizer และสามารถเพิ่มผู้เข้าร่วมคนอื่นได้
             attendees = [
-                {'email': name1_email, 'responseStatus': 'accepted', 'organizer': True},
-                {'email': name2_email}
+                {'email': user_email, 'responseStatus': 'accepted', 'organizer': True}
             ] + additional_attendees
             event_data['attendees'] = attendees
             
-            # สร้างกิจกรรมในปฏิทินของ name1
-            created_event = service1.events().insert(
+            # สร้างกิจกรรมในปฏิทินของ user
+            created_event = service.events().insert(
                 calendarId="primary",
                 body=event_data
             ).execute()
             
             results.append({
-                'email': name1_email,
+                'email': user_email,
                 'success': True,
-                'message': f'สร้างการนัดหมายสำเร็จ มี {name2} เป็นผู้เข้าร่วม',
+                'message': f'สร้างการนัดหมายสำเร็จสำหรับ {user_name}',
                 'event_id': created_event['id'],
                 'html_link': created_event['htmlLink']
             })
@@ -1521,7 +1483,7 @@ def create_bulk_events(event_request: BulkEventRequest):
         except Exception as e:
             print(f"เกิดข้อผิดพลาดในการสร้างการนัดหมาย: {str(e)}")
             results.append({
-                'email': name1_email,
+                'email': user_email,
                 'success': False,
                 'message': f'เกิดข้อผิดพลาด: {str(e)}'
             })
@@ -1545,14 +1507,14 @@ def create_bulk_events(event_request: BulkEventRequest):
         # สร้าง Line Response แบบ text ธรรมดา
         line_response = {
             "type": "text",
-            "text": f"นัดใน Google Calendar เรียบร้อยแล้ว สำหรับ {name1} และ {name2} ในหัวข้อ \"{event_summary}\" วันที่ {event_request.date} เวลา {event_request.time}"
+            "text": f"นัดใน Google Calendar เรียบร้อยแล้ว สำหรับ {user_name} ในหัวข้อ \"{event_summary}\" วันที่ {event_request.date} เวลา {event_request.time}"
         }
         
         # คืนค่าข้อมูลพร้อมกับ Line Response Object
         print(f"[DEBUG] API done at {timeTest.time() - start:.3f}s")
         return JSONResponse(
             content={
-                "message": f"ดำเนินการสร้างการนัดหมายสำหรับ {name1_email} และ {name2_email}",
+                "message": f"ดำเนินการสร้างการนัดหมายสำหรับ {user_email}",
                 "results": results,
                 "line_payload": [line_response]
             },
@@ -1675,7 +1637,7 @@ def get_user_events(
             "auth_required": True,
             "auth_url": auth_url,
             "redirect_url": redirect_page_url,
-            "line_payload": [line_flex_message]
+            # "line_payload": [line_flex_message]
         }
         
         return JSONResponse(

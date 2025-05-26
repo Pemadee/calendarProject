@@ -17,7 +17,7 @@ class UsersRequest(BaseModel):
     end_time: Optional[str] = None    # เช่น "19:00:00"
 
 class BulkEventRequest(BaseModel):
-    name_pair: str  # รับในรูปแบบ "name1-name2"
+    name: str  # รับในรูปแบบ "name1-name2"
     location: str   # เช่น "Silom", "Asoke" เป็นต้น
     event_location: Optional[str] = None
     date: str       # รูปแบบ "YYYY-MM-DD" เช่น "2025-05-27"
