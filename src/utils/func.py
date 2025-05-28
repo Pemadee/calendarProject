@@ -776,6 +776,65 @@ def create_timeslot_range(date, start_hour=9, end_hour=18, interval_minutes=30):
             slots.append((slot_start, slot_end))
     return slots
 
+def create_facebook_quick_replies(items_data, max_items=13, add_back_button=True):
+    """
+    สร้างปุ่ม quick reply สำหรับ Facebook Messenger
+    Args:
+        items_data: รายการข้อมูลที่จะแสดงเป็นปุ่ม [(label, text), ...]
+        max_items: จำนวนปุ่มสูงสุด (default: 13, Facebook limit is 13)
+        add_back_button: เพิ่มปุ่มย้อนกลับหรือไม่ (default: True)
+    Returns:
+        list: รายการออบเจ็กต์ปุ่ม quick reply สำหรับ Facebook
+    """
+    quick_replies = []
+    
+    # จำกัดจำนวนปุ่ม
+    data_items = items_data[:max_items-1 if add_back_button else max_items]
+    
+    # เพิ่มปุ่มตามข้อมูล
+    for label, text in data_items:
+        quick_replies.append({
+            "content_type": "text",
+            "title": label,      # แสดงข้อความบนปุ่ม (max 20 characters)
+            "payload": text      # ข้อมูลที่จะส่งกลับ
+        })
+    
+    # เพิ่มปุ่มย้อนกลับ
+    if add_back_button:
+        quick_replies.append({
+            "content_type": "text",
+            "title": "ย้อนกลับ",
+            "payload": "ย้อนกลับ"
+        })
+    
+    return quick_replies
+
+def create_facebook_button_template(title, buttons, subtitle=None):
+    """
+    สร้าง Button Template สำหรับ Facebook Messenger
+    Args:
+        title: หัวข้อข้อความ
+        buttons: รายการปุ่ม
+        subtitle: รายละเอียดเพิ่มเติม (optional)
+    Returns:
+        dict: Facebook Button Template
+    """
+    template = {
+        "attachment": {
+            "type": "template",
+            "payload": {
+                "template_type": "button",
+                "text": title,
+                "buttons": buttons
+            }
+        }
+    }
+    
+    if subtitle:
+        template["attachment"]["payload"]["text"] = f"{title}\n{subtitle}"
+    
+    return template
+
 def create_line_quick_reply_items(items_data, max_items=12, add_back_button=True):
     """
     สร้างปุ่ม quick reply สำหรับ LINE

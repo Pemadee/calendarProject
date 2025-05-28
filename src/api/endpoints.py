@@ -32,7 +32,7 @@ from requests import request
 from config import *
 from models.schemas import *
 from models.token_model import TokenResponse
-from utils.func import *
+from utils.func import  *
 from utils.token_db import *
 from utils.scheduler_instance import scheduler
 import httpx
@@ -64,7 +64,7 @@ REDIRECT_URI = 'http://localhost:8000/'  # กำหนด redirect URI
 # ปอดการแจ้งเตือน INFO:googleapiclient.discovery_cache:file_cache is only supported with oauth2client<4.0.0
 logging.getLogger('googleapiclient.discovery_cache').setLevel(logging.ERROR)
 base_url = os.environ.get('BASE_URL')
-CLIENT_SECRET_FILE = os.getenv("CLIENT_SECRET_FILE")
+CLIENT_SECRET_FILE = os.getenv("CLIENT_SECRET_FILE2")
 
 @app.middleware("http")
 async def catch_all(request: Request, call_next):
@@ -894,12 +894,13 @@ def get_available_time_slots(request: ManagerRecruiter):
     return JSONResponse(content=response)
 
 #================================================API appointment =============================================
-# API 1: ดึงวัน
+# API 1: ดึงวัน - Updated version
 @app.post("/events/available-dates")
 def get_available_dates(request: LocationRequest):
     """
     ดึงข้อมูลวันที่มีเวลาว่างตรงกันระหว่าง Manager และ Recruiter
     แสดงวันที่มีคู่ว่างให้ครบ 7 วัน โดยเว้นวันเสาร์-อาทิตย์
+    รองรับทั้ง LINE และ Facebook Messenger
     """
     start = timeTest.time()
     print(f"[START] API started at {start:.6f}")
@@ -940,8 +941,8 @@ def get_available_dates(request: LocationRequest):
         
         current_date += timedelta(days=1)
     print(f"[LOG] building date_list done in {timeTest.time() - t2:.3f}s")
+    
     # ดึงข้อมูลกิจกรรมสำหรับ Recruiter
-
     recruiters_events = {}
     t4 = timeTest.time()
     for user_info in users_dict['R']:
@@ -983,6 +984,7 @@ def get_available_dates(request: LocationRequest):
         else:
             print(f"ผู้ใช้ {email} ยังไม่ได้ยืนยันตัวตน")
     print(f"[LOG] Fetched all Recruiter events in {timeTest.time() - t4:.3f}s")
+    
     # ตรวจสอบวันที่มีเวลาว่าง
     available_dates = []
     t5 = timeTest.time()
@@ -1005,7 +1007,6 @@ def get_available_dates(request: LocationRequest):
                                        
                     if recruiter_is_available:
                         has_available_slot = True
-                        
                         break
                 
                 if has_available_slot:
@@ -1020,28 +1021,44 @@ def get_available_dates(request: LocationRequest):
     
     print(f"[LOG] Matching available slots done in {timeTest.time() - t5:.3f}s")
     
-    # สร้างปุ่ม quick reply สำหรับวันที่ที่มีคู่ว่าง
+    # สร้างข้อมูลวันที่สำหรับปุ่ม
     date_items = [(create_thai_date_label(date_str), date_str) for date_str in available_dates]
-    items = create_line_quick_reply_items(date_items, max_items=13, add_back_button=False)
     
-    # สร้างข้อความ
+    # สร้างปุ่มสำหรับ LINE
+    line_items = create_line_quick_reply_items(date_items, max_items=13, add_back_button=False)
+    
+    # สร้างปุ่มสำหรับ Facebook
+    facebook_items = create_facebook_quick_replies(date_items, max_items=13, add_back_button=False)
+    
+    # สร้างข้อความสำหรับ LINE
     line_message = {
         "type": "text",
         "text": "กรุณาเลือกวันที่ต้องการนัดประชุม",
         "quickReply": {
-            "items": items
+            "items": line_items
         }
     }
     
-    # สร้าง response ในรูปแบบของ LINE Payload
-    if not items:
+    # สร้างข้อความสำหรับ Facebook
+    facebook_message = {
+        "text": "กรุณาเลือกวันที่ต้องการนัดประชุม",
+        "quick_replies": facebook_items
+    }
+    
+    # จัดการกรณีไม่มีวันที่ว่าง
+    if not date_items:
         line_message = {
             "type": "text",
             "text": "ไม่พบวันที่ว่างในระบบ กรุณาติดต่อผู้ดูแลระบบ"
         }
+        facebook_message = {
+            "text": "ไม่พบวันที่ว่างในระบบ กรุณาติดต่อผู้ดูแลระบบ"
+        }
     
+    # สร้าง response ที่รองรับทั้งสองแพลตฟอร์ม
     response = {
         "line_payload": [line_message],
+        "facebook_payload": [facebook_message],
         "available_dates": available_dates
     }
     
@@ -1590,7 +1607,7 @@ def get_available_dates(request: LocationRequest):
 
 
 
-# เพิ่ม global variable เพื่อเก็บข้อมูล recruiter ที่สุ่มมา (เก็บได้แค่คนเดียว)
+
 selected_recruiter = None
 name_recruiter = None
 date_book = None
@@ -1601,6 +1618,7 @@ async def get_available_timeslots(request: DateRequest):
     ดึงข้อมูลช่วงเวลาที่ว่างในวันที่ระบุ
     แสดงเฉพาะช่วงเวลาว่างในระหว่าง 09:00 - 18:00 โดยแบ่งเป็นช่วงละ 30 นาที
     และเก็บข้อมูล recruiter ที่สุ่มมาสำหรับใช้ใน API create-bulk
+    รองรับทั้ง LINE และ Facebook Messenger
     """
     start = timeTest.time()
     print(f"[START] API started at {start:.6f}")
@@ -1685,13 +1703,21 @@ async def get_available_timeslots(request: DateRequest):
         print(f"[LOG] Updated selected recruiter: {recruiter_name} ({recruiter_email})")
 
     else:
+        # สร้าง response สำหรับกรณีไม่พบ recruiter
+        line_message = {
+            "type": "text",
+            "text": "ขออภัย ไม่พบ recruiter ที่ใช้งานได้ในขณะนี้"
+        }
+        
+        facebook_message = {
+            "text": "ขออภัย ไม่พบ recruiter ที่ใช้งานได้ในขณะนี้"
+        }
+        
         return JSONResponse(
             content={
                 "message": "ไม่พบ recruiter ที่ใช้งานได้",
-                "line_payload": [{
-                    "type": "text",
-                    "text": "ขออภัย ไม่พบ recruiter ที่ใช้งานได้ในขณะนี้"
-                }]
+                "line_payload": [line_message],
+                "facebook_payload": [facebook_message]
             },
             headers={"Response-Type": "object"}
         )
@@ -1737,7 +1763,7 @@ async def get_available_timeslots(request: DateRequest):
                 })
     print(f"[LOG] find_available_time_slots done in {timeTest.time() - t4:.3f}s")            
   
-    # แปลงข้อมูลเพื่อสร้างข้อความและปุ่มสำหรับ LINE
+    # แปลงข้อมูลเพื่อสร้างข้อความและปุ่มสำหรับ LINE และ Facebook
     slot_texts = []
     
     # สร้างรูปแบบวันที่แบบไทย
@@ -1754,32 +1780,46 @@ async def get_available_timeslots(request: DateRequest):
         # เพิ่มข้อมูลสำหรับปุ่ม (ใช้ช่วงเวลาเป็น label และ text)
         slot_items.append((time_slot, time_slot))
 
-    # สร้างปุ่ม quick reply
-    items = create_line_quick_reply_items(slot_items, max_items=12, add_back_button=True)
+    # สร้างปุ่ม quick reply สำหรับ LINE
+    line_items = create_line_quick_reply_items(slot_items, max_items=12, add_back_button=True)
+    
+    # สร้างปุ่ม quick reply สำหรับ Facebook
+    facebook_items = create_facebook_quick_replies(slot_items, max_items=12, add_back_button=True)
 
     # สร้างข้อความ
     message_text = f"📅 วันที่ : {thai_date}\n🗓️ กรุณาเลือกช่วงเวลาที่ต้องการ" 
 
+    # สร้างข้อความสำหรับ LINE
     line_message = {
         "type": "text",
         "text": message_text,
         "quickReply": {
-            "items": items
+            "items": line_items
         }
+    }
+    
+    # สร้างข้อความสำหรับ Facebook
+    facebook_message = {
+        "text": message_text,
+        "quick_replies": facebook_items
     }
     
     response = {
         "line_payload": [line_message],
+        "facebook_payload": [facebook_message],
         "date": request.date,
-        "recruiter": f"{recruiter_name}"
+        "recruiter_name": f"{recruiter_name}"
     }
     
     print(f"[LOG] API done at {timeTest.time() - start:.3f}s")
     
     return JSONResponse(
         content=response,
-        headers={"Response-Type": "object"}
+        headers={
+            "Response-Type": "object",
+            "Recruiter": f"{recruiter_name}"}
     )
+
 
 # API 2: สร้างการนัดหมายโดยใช้ recruiter ที่เก็บไว้
 @app.post("/events/create-bulk")
@@ -1807,14 +1847,20 @@ def create_bulk_events(event_request: BulkEventRequestUpdated):
         try:
             start_time, end_time = convert_to_iso_format(event_request.date, event_request.time)
         except ValueError as e:
+            line_message = {
+                "type": "text",
+                "text": f"รูปแบบวันที่หรือเวลาไม่ถูกต้อง: {str(e)}"
+            }
+            facebook_message = {
+                "text": f"รูปแบบวันที่หรือเวลาไม่ถูกต้อง: {str(e)}"
+            }
+            
             return JSONResponse(
                 content={
                     "message": "รูปแบบวันที่หรือเวลาไม่ถูกต้อง",
                     "error": str(e),
-                    "line_payload": [{
-                        "type": "text",
-                        "text": f"รูปแบบวันที่หรือเวลาไม่ถูกต้อง: {str(e)}"
-                    }]
+                    "line_payload": [line_message],
+                    "facebook_payload": [facebook_message]
                 },
                 headers={"Response-Type": "object"}
             )
@@ -1824,14 +1870,20 @@ def create_bulk_events(event_request: BulkEventRequestUpdated):
         
         # ดึงข้อมูล recruiter ที่เก็บไว้
         if selected_recruiter is None:
+            line_message = {
+                "type": "text",
+                "text": "ไม่พบข้อมูล recruiter ที่เลือกไว้ กรุณาเลือกเวลาใหม่"
+            }
+            facebook_message = {
+                "text": "ไม่พบข้อมูล recruiter ที่เลือกไว้ กรุณาเลือกเวลาใหม่"
+            }
+            
             return JSONResponse(
                 content={
                     "message": "ไม่พบข้อมูล recruiter ที่เลือกไว้",
                     "error": "กรุณาเรียก API timeslot ก่อนสร้างนัดหมาย",
-                    "line_payload": [{
-                        "type": "text",
-                        "text": "ไม่พบข้อมูล recruiter ที่เลือกไว้ กรุณาเลือกเวลาใหม่"
-                    }]
+                    "line_payload": [line_message],
+                    "facebook_payload": [facebook_message]
                 },
                 headers={"Response-Type": "object"}
             )
@@ -1844,8 +1896,11 @@ def create_bulk_events(event_request: BulkEventRequestUpdated):
         
         # ตรวจสอบว่าผู้ใช้ได้ยืนยันตัวตนแล้วหรือไม่
         if not is_token_valid(user_email):
-            line_response = {
+            line_message = {
                 "type": "text",
+                "text": "ไม่สามารถสร้างการนัดหมายได้ เนื่องจากผู้ใช้ยังไม่ได้ยืนยันตัวตน"
+            }
+            facebook_message = {
                 "text": "ไม่สามารถสร้างการนัดหมายได้ เนื่องจากผู้ใช้ยังไม่ได้ยืนยันตัวตน"
             }
             
@@ -1853,7 +1908,8 @@ def create_bulk_events(event_request: BulkEventRequestUpdated):
                 content={
                     "message": "ผู้ใช้ยังไม่ได้ยืนยันตัวตน",
                     "invalid_user": user_email,
-                    "line_payload": [line_response]
+                    "line_payload": [line_message],
+                    "facebook_payload": [facebook_message]
                 },
                 headers={"Response-Type": "object"}
             )
@@ -1899,9 +1955,12 @@ def create_bulk_events(event_request: BulkEventRequestUpdated):
                     'calendar_owner': user_email
                 })
             
-            # สร้าง Line Response สำหรับกรณีที่มีกิจกรรมซ้ำซ้อน
-            line_response = {
+            # สร้าง Response สำหรับกรณีที่มีกิจกรรมซ้ำซ้อน
+            line_message = {
                 "type": "text",
+                "text": f"ขออภัย ไม่สามารถทำการสร้างนัดได้เนื่องจากมีกิจกรรมอยู่แล้ว"
+            }
+            facebook_message = {
                 "text": f"ขออภัย ไม่สามารถทำการสร้างนัดได้เนื่องจากมีกิจกรรมอยู่แล้ว"
             }
             
@@ -1909,7 +1968,8 @@ def create_bulk_events(event_request: BulkEventRequestUpdated):
                 content={
                     "message": "มีกิจกรรมซ้ำซ้อนในช่วงเวลาเดียวกัน",
                     "conflict_events": conflict_events,
-                    "line_payload": [line_response]
+                    "line_payload": [line_message],
+                    "facebook_payload": [facebook_message]
                 },
                 headers={"Response-Type": "object"}
             )
@@ -1984,9 +2044,12 @@ def create_bulk_events(event_request: BulkEventRequestUpdated):
                 'message': f'เกิดข้อผิดพลาด: {str(e)}'
             })
             
-            # สร้าง Line Response สำหรับกรณีเกิดข้อผิดพลาด
-            line_response = {
+            # สร้าง Response สำหรับกรณีเกิดข้อผิดพลาด
+            line_message = {
                 "type": "text",
+                "text": f"เกิดข้อผิดพลาดในการสร้างการนัดหมาย: {str(e)}"
+            }
+            facebook_message = {
                 "text": f"เกิดข้อผิดพลาดในการสร้างการนัดหมาย: {str(e)}"
             }
             
@@ -1995,32 +2058,42 @@ def create_bulk_events(event_request: BulkEventRequestUpdated):
                 content={
                     "message": "เกิดข้อผิดพลาดในการสร้างการนัดหมาย",
                     "error": str(e),
-                    "line_payload": [line_response]
+                    "line_payload": [line_message],
+                    "facebook_payload": [facebook_message]
                 },
                 headers={"Response-Type": "object"}
             )
         
-        # สร้าง Line Response แบบ text ธรรมดา
-        line_response = {
+        # สร้าง Response แบบ text ธรรมดา
+        success_text = f"✅สร้างนัดใน Calendar เรียบร้อย\n{event_summary}\n📅วัน : {thai_date}\n🕒เวลา : {event_request.time} น.\n👤Recruiter: K.{user_name}"
+        
+        line_message = {
             "type": "text",
-            "text": f"✅สร้างนัดใน Calendar เรียบร้อย\n{event_summary}\n📅วัน : {thai_date}\n🕒เวลา : {event_request.time} น.\n👤Recruiter: K.{user_name}"
+            "text": success_text
+        }
+        facebook_message = {
+            "text": success_text
         }
         
-        # คืนค่าข้อมูลพร้อมกับ Line Response Object
+        # คืนค่าข้อมูลพร้อมกับ Response Object
         print(f"[DEBUG] API done at {timeTest.time() - start:.3f}s")
         return JSONResponse(
             content={
                 "message": f"ดำเนินการสร้างการนัดหมายสำหรับ K. {user_name} ({user_email})",
                 "results": results,
-                "line_payload": [line_response]
+                "line_payload": [line_message],
+                "facebook_payload": [facebook_message]
             },
             headers={"Response-Type": "object"}
         )
             
     except Exception as e:
-        # สร้าง Line Response สำหรับกรณีเกิดข้อผิดพลาด
-        line_response = {
+        # สร้าง Response สำหรับกรณีเกิดข้อผิดพลาด
+        line_message = {
             "type": "text",
+            "text": f"เกิดข้อผิดพลาดในการสร้างการนัดหมาย: {str(e)}"
+        }
+        facebook_message = {
             "text": f"เกิดข้อผิดพลาดในการสร้างการนัดหมาย: {str(e)}"
         }
         
@@ -2029,13 +2102,13 @@ def create_bulk_events(event_request: BulkEventRequestUpdated):
             content={
                 "message": "เกิดข้อผิดพลาดในการสร้างการนัดหมาย",
                 "error": str(e),
-                "line_payload": [line_response]
+                "line_payload": [line_message],
+                "facebook_payload": [facebook_message]
             },
             headers={"Response-Type": "object"}
         )
 
-# API เพิ่มเติม: ดูข้อมูล recruiter ที่เก็บไว้ (สำหรับ debug)
-@app.get("/events/selected-recruiter")
+@app.get("/selected-recruiter")
 def get_selected_recruiter():
     """ดูข้อมูล recruiter ที่เก็บไว้ (สำหรับ debug)"""
     return {
@@ -2044,15 +2117,15 @@ def get_selected_recruiter():
         "recruiter": name_recruiter,
         "date": date_book
     }
-
 #login
+# API 3: Login - ดึงข้อมูลผู้ใช้และยืนยันตัวตน
 @app.get("/events/{user_email}")
 def get_user_events(
     user_email: str, 
     calendar_id: str = "primary",
     start_date: Optional[str] = None, 
     end_date: Optional[str] = None):
-    """ดึงข้อมูลกิจกรรมของผู้ใช้คนเดียว และยืนยันตัวตนหากจำเป็น"""
+    """ดึงข้อมูลกิจกรรมของผู้ใช้คนเดียว และยืนยันตัวตนหากจำเป็น รองรับทั้ง LINE และ Facebook"""
     # ดึงข้อมูลและยืนยันตัวตนถ้าจำเป็น
     creds_result = get_credentials(user_email)
     
@@ -2067,6 +2140,7 @@ def get_user_events(
         # สร้าง URL ไปยังหน้า redirect ของเรา
         redirect_page_url = f"{base_url}/auth-redirect?auth_url={encoded_auth_url}&email={encoded_email}"
         
+        # สร้าง LINE Flex Message
         line_flex_message = {
             "type": "flex",
             "altText": "กรุณาเข้าสู่ระบบ Google Calendar",
@@ -2088,8 +2162,8 @@ def get_user_events(
                                     "weight": "bold",
                                     "size": "xl",
                                     "color": "#4285F4",
-                                    "align": "center",       # จัดกลาง
-                                    "gravity": "center",     # จัดให้อยู่ตรงกลางแนวตั้ง
+                                    "align": "center",
+                                    "gravity": "center",
                                     "wrap": True
                                 }
                             ]
@@ -2135,7 +2209,18 @@ def get_user_events(
             }
         }
 
-
+        # สร้าง Facebook Button Template
+        facebook_button_message = create_facebook_button_template(
+            title="กรุณาเข้าสู่ระบบ Google Calendar",
+            subtitle=f"อีเมล: {user_email}",
+            buttons=[
+                {
+                    "type": "web_url",
+                    "url": redirect_page_url,
+                    "title": "🔗เข้าสู่ระบบกับ Google"
+                }
+            ]
+        )
         
         # สร้าง response object พร้อม header ที่ระบุว่าเป็น JSON
         response_data = {
@@ -2144,7 +2229,8 @@ def get_user_events(
             "auth_required": True,
             "auth_url": auth_url,
             "redirect_url": redirect_page_url,
-            "line_payload": [line_flex_message]
+            "line_payload": [line_flex_message],
+            "facebook_payload": [facebook_button_message]
         }
         
         return JSONResponse(
@@ -2155,7 +2241,7 @@ def get_user_events(
     # ถ้ามี credentials แล้ว ส่งข้อความว่าผู้ใช้เข้าสู่ระบบแล้ว
     try:
         # สร้าง LINE Flex Message แจ้งว่าได้เข้าสู่ระบบแล้ว
-        already_login_message = {
+        line_already_login_message = {
             "type": "flex",
             "altText": "คุณได้ทำการเข้าสู่ระบบแล้ว✅",
             "contents": {
@@ -2183,11 +2269,17 @@ def get_user_events(
             }
         }
         
+        # สร้าง Facebook Text Message
+        facebook_already_login_message = {
+            "text": f"คุณได้ทำการเข้าสู่ระบบแล้ว✅\nอีเมล: {user_email}"
+        }
+        
         response_data = {
             'email': user_email,
             'is_authenticated': True,
             'message': "คุณได้ทำการเข้าสู่ระบบแล้ว✅",
-            'line_payload': [already_login_message]
+            'line_payload': [line_already_login_message],
+            'facebook_payload': [facebook_already_login_message]
         }
         
         return JSONResponse(
@@ -2198,7 +2290,7 @@ def get_user_events(
         print(f"เกิดข้อผิดพลาดสำหรับ {user_email}: {str(e)}")
         
         # สร้าง LINE Flex Message สำหรับแสดงข้อผิดพลาด
-        error_flex_message = {
+        line_error_flex_message = {
             "type": "flex",
             "altText": "เกิดข้อผิดพลาด",
             "contents": {
@@ -2240,11 +2332,24 @@ def get_user_events(
             }
         }
         
+        # สร้าง Facebook Button Template สำหรับข้อผิดพลาด
+        facebook_error_message = {
+            "text": f"เกิดข้อผิดพลาด: {str(e)}",
+            "quick_replies": [
+                {
+                    "content_type": "text",
+                    "title": "ลองใหม่",
+                    "payload": f"login {user_email}"
+                }
+            ]
+        }
+        
         error_response = {
             'email': user_email,
             'error': str(e),
             'is_authenticated': False,
-            'line_payload': [error_flex_message]
+            'line_payload': [line_error_flex_message],
+            'facebook_payload': [facebook_error_message]
         }
         print(error_response)
         return JSONResponse(
@@ -2252,9 +2357,9 @@ def get_user_events(
             headers={"Response-Type": "object"}
         )
 
+
+
 # =========================================================================================================
-
-
 @app.post("/test")
 def test(request: LocationRequest):
     getPeople = get_people(location=request.location)
