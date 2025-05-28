@@ -64,7 +64,7 @@ REDIRECT_URI = 'http://localhost:8000/'  # กำหนด redirect URI
 # ปอดการแจ้งเตือน INFO:googleapiclient.discovery_cache:file_cache is only supported with oauth2client<4.0.0
 logging.getLogger('googleapiclient.discovery_cache').setLevel(logging.ERROR)
 base_url = os.environ.get('BASE_URL')
-CLIENT_SECRET_FILE = os.getenv("CLIENT_SECRET_FILE2")
+CLIENT_SECRET_FILE = os.getenv("CLIENT_SECRET_FILE")
 
 @app.middleware("http")
 async def catch_all(request: Request, call_next):
