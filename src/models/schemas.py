@@ -16,14 +16,19 @@ class UsersRequest(BaseModel):
     start_time: Optional[str] = None  # เช่น "18:30:00"
     end_time: Optional[str] = None    # เช่น "19:00:00"
 
+
 class BulkEventRequest(BaseModel):
-    name: str  # รับในรูปแบบ "name1-name2"
+    name2: str      # รับชื่อของ name2 อย่างเดียว
     location: str   # เช่น "Silom", "Asoke" เป็นต้น
-    event_location: Optional[str] = None
     date: str       # รูปแบบ "YYYY-MM-DD" เช่น "2025-05-27"
     time: str       # รูปแบบ "HH:MM-HH:MM" เช่น "09:30-10:00"
     attendees: Optional[List[str]] = None  # รายชื่ออีเมลของผู้เข้าร่วมเพิ่มเติม
 
+class BulkEventRequestUpdated(BaseModel):
+    location: str
+    date: str
+    time: str
+    attendees: Optional[List[str]] = []
 
 class ManagerRecruiter(BaseModel):
     file_path: Optional[str] = None

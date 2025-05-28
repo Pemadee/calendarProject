@@ -558,84 +558,54 @@ def convert_to_iso_format(date, time):
 
 
 
-
 def find_email_from_name(name, location):
     """
-    รับชื่อเดียวและ location เพื่อค้นหาอีเมลจาก Excel
+    รับชื่อของ name2 และ location เพื่อค้นหาอีเมลจาก Google Sheet
     
     Args:
-        name (str): ชื่อที่ต้องการค้นหา
+        name (str): ชื่อของ name2
         location (str): สถานที่ เช่น "Silom", "Asoke" เป็นต้น
         
     Returns:
-        dict: ข้อมูลอีเมลที่ค้นพบ ประกอบด้วย name_email, name
+        dict: ข้อมูลอีเมลและชื่อที่ค้นพบ ประกอบด้วย email, name
     """
-    # อ่านไฟล์ Excel
     try:
-        # ปรับ path ตามที่เก็บไฟล์จริง
-        
+        # เชื่อมต่อกับ Google Sheet
         sheet = client.open_by_key(spreadsheet_id)
-        worksheet_M = sheet.worksheet('M')
-        worksheet_R = sheet.worksheet('R')
+        worksheet_R = sheet.worksheet('R')  # ค้นหาในชีต R เท่านั้น
         
-        df_m = get_as_dataframe(worksheet_M, evaluate_formulas=True, skiprows=0)
         df_r = get_as_dataframe(worksheet_R, evaluate_formulas=True, skiprows=0)
         
-        # ค้นหาในชีต M ก่อน
+        # ค้นหาในชีต R
         email = None
-        found_in_sheet = None
-        
-        for i in range(len(df_m)):
+        for i in range(len(df_r)):
             # ตรวจสอบว่าเป็นหัวข้อ location ที่ต้องการหรือไม่
-            if df_m.iloc[i, 0] == location:
+            if df_r.iloc[i, 0] == location:
                 # ค้นหาในแถวถัดๆ ไปจนกว่าจะเจอ location ถัดไป
                 j = i + 1
-                while j < len(df_m) and not pd.isna(df_m.iloc[j, 0]) and not df_m.iloc[j, 0] in ["Silom", "Asoke", "Phuket", "Pattaya", "Samui", "Huahin", "Chiangmai"]:
-                    if df_m.iloc[j, 0] == name:
+                while j < len(df_r) and not pd.isna(df_r.iloc[j, 0]) and not df_r.iloc[j, 0] in ["Silom", "Asoke", "Phuket", "Pattaya", "Samui", "Huahin", "Chiangmai"]:
+                    if df_r.iloc[j, 0] == name:
                         # พบชื่อที่ต้องการ ค้นหาอีเมลในคอลัมน์ Email
-                        if 'Email' in df_m.columns:
-                            email_col_idx = df_m.columns.get_loc('Email')
-                            email = df_m.iloc[j, email_col_idx]
+                        if 'Email' in df_r.columns:
+                            email_col_idx = df_r.columns.get_loc('Email')
+                            email = df_r.iloc[j, email_col_idx]
                             if pd.isna(email):
                                 raise ValueError(f"พบชื่อ {name} แล้ว แต่ไม่มีข้อมูลอีเมล")
-                            found_in_sheet = 'M'
                             break
                     j += 1
                 break
         
-        # ถ้าไม่เจอในชีต M ให้ค้นหาในชีต R
         if email is None:
-            for i in range(len(df_r)):
-                # ตรวจสอบว่าเป็นหัวข้อ location ที่ต้องการหรือไม่
-                if df_r.iloc[i, 0] == location:
-                    # ค้นหาในแถวถัดๆ ไปจนกว่าจะเจอ location ถัดไป
-                    j = i + 1
-                    while j < len(df_r) and not pd.isna(df_r.iloc[j, 0]) and not df_r.iloc[j, 0] in ["Silom", "Asoke", "Phuket", "Pattaya", "Samui", "Huahin", "Chiangmai"]:
-                        if df_r.iloc[j, 0] == name:
-                            # พบชื่อที่ต้องการ ค้นหาอีเมลในคอลัมน์ Email
-                            if 'Email' in df_r.columns:
-                                email_col_idx = df_r.columns.get_loc('Email')
-                                email = df_r.iloc[j, email_col_idx]
-                                if pd.isna(email):
-                                    raise ValueError(f"พบชื่อ {name} แล้ว แต่ไม่มีข้อมูลอีเมล")
-                                found_in_sheet = 'R'
-                                break
-                        j += 1
-                    break
-        
-        if email is None:
-            raise ValueError(f"ไม่พบอีเมลสำหรับชื่อ {name} ในพื้นที่ {location}")
+            raise ValueError(f"ไม่พบอีเมลสำหรับชื่อ {name} ในพื้นที่ {location} ในชีต R")
         
         # คืนค่าเป็น dict ที่มีข้อมูลที่ต้องการ
         return {
-            "name_email": email,
-            "name": name,
-            "found_in_sheet": found_in_sheet  # เพิ่มข้อมูลว่าพบในชีตไหน (อาจมีประโยชน์)
+            "email": email,
+            "name": name
         }
         
     except Exception as e:
-        raise Exception(f"เกิดข้อผิดพลาดในการอ่านข้อมูลจาก Excel: {str(e)}")
-
+        raise Exception(f"เกิดข้อผิดพลาดในการอ่านข้อมูลจาก Google Sheet: {str(e)}")
 
 #========================================== fot API date, timeslot, pairs ======================================
 import asyncio
@@ -822,13 +792,13 @@ def create_line_quick_reply_items(items_data, max_items=12, add_back_button=True
     data_items = items_data[:max_items-1 if add_back_button else max_items]
     
     # เพิ่มปุ่มตามข้อมูล
-    for i, (label, text) in enumerate(data_items, start=1):
+    for label, text in data_items:
         items.append({
             "type": "action",
             "action": {
                 "type": "message",
-                "label": label,
-                "text": text
+                "label": label,  # แสดงช่วงเวลาบนปุ่ม
+                "text": text     # ส่งช่วงเวลาเป็น text
             }
         })
     
