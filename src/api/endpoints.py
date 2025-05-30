@@ -64,7 +64,7 @@ REDIRECT_URI = 'http://localhost:8000/'  # กำหนด redirect URI
 # ปอดการแจ้งเตือน INFO:googleapiclient.discovery_cache:file_cache is only supported with oauth2client<4.0.0
 logging.getLogger('googleapiclient.discovery_cache').setLevel(logging.ERROR)
 base_url = os.environ.get('BASE_URL')
-CLIENT_SECRET_FILE = os.getenv("CLIENT_SECRET_FILE")
+CLIENT_SECRET_FILE = os.getenv("CLIENT_SECRET_FILE2")
 
 @app.middleware("http")
 async def catch_all(request: Request, call_next):
@@ -895,6 +895,7 @@ def get_available_time_slots(request: ManagerRecruiter):
 
 #================================================API appointment =============================================
 # API 1: ดึงวัน - Updated version
+import concurrent.futures
 @app.post("/events/available-dates")
 def get_available_dates(request: LocationRequest):
     """
@@ -942,48 +943,34 @@ def get_available_dates(request: LocationRequest):
         current_date += timedelta(days=1)
     print(f"[LOG] building date_list done in {timeTest.time() - t2:.3f}s")
     
-    # ดึงข้อมูลกิจกรรมสำหรับ Recruiter
+    # ดึงข้อมูลกิจกรรมสำหรับ Recruiter แบบ concurrent
     recruiters_events = {}
     t4 = timeTest.time()
-    for user_info in users_dict['R']:
-        email = user_info["Email"]
-        name = user_info["Name"]
-        calendar_id = email
+    
+    # ใช้ ThreadPoolExecutor เพื่อประมวลผลแบบ concurrent
+    max_workers = min(len(users_dict['R']), 5)  # จำกัดไม่เกิน 5 threads
+    
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # สร้าง futures สำหรับแต่ละ recruiter
+        future_to_user = {
+            executor.submit(check_token_and_fetch_events, user_info, time_min, time_max): user_info
+            for user_info in users_dict['R']
+        }
         
-        if is_token_valid(email):
+        # รวบรวมผลลัพธ์
+        for future in concurrent.futures.as_completed(future_to_user):
+            user_info = future_to_user[future]
             try:
-                token_entry = get_token(email)
-                creds = Credentials(
-                    token=token_entry.access_token,
-                    refresh_token=token_entry.refresh_token,
-                    token_uri="https://oauth2.googleapis.com/token",
-                    client_id=CLIENT_ID,
-                    client_secret=CLIENT_SECRET,
-                    scopes=SCOPES
-                )
-                
-                service = build('calendar', 'v3', credentials=creds)
-                
-                events_result = service.events().list(
-                    calendarId=calendar_id,
-                    timeMin=time_min,
-                    timeMax=time_max,
-                    singleEvents=True,
-                    orderBy='startTime'
-                ).execute()
-                
-                events = events_result.get('items', [])
-                
-                # เก็บข้อมูลกิจกรรม
-                recruiters_events[email] = {
-                    'name': name,
-                    'events': events
-                }
-            except Exception as e:
-                print(f"เกิดข้อผิดพลาดในการดึงข้อมูลสำหรับ R: {email}: {str(e)}")
-        else:
-            print(f"ผู้ใช้ {email} ยังไม่ได้ยืนยันตัวตน")
-    print(f"[LOG] Fetched all Recruiter events in {timeTest.time() - t4:.3f}s")
+                result = future.result()
+                if result is not None:
+                    recruiters_events[result['email']] = {
+                        'name': result['name'],
+                        'events': result['events']
+                    }
+            except Exception as exc:
+                print(f"เกิดข้อผิดพลาดในการประมวลผลสำหรับ {user_info['Email']}: {exc}")
+    
+    print(f"[LOG] Concurrent token check and fetch events done in {timeTest.time() - t4:.3f}s")
     
     # ตรวจสอบวันที่มีเวลาว่าง
     available_dates = []
@@ -1068,7 +1055,6 @@ def get_available_dates(request: LocationRequest):
         content=response,
         headers={"Response-Type": "object"}
     )
-
 # API 2: ดึงช่วงเวลาและคู่ในวันที่เลือก
 # @app.post("/events/available-timeslots") 
 # async def get_available_timeslots(request: DateRequest):
@@ -1603,520 +1589,8 @@ def get_available_dates(request: LocationRequest):
 #             },
 #             headers={"Response-Type": "object"}
 #         )
-# เพิ่ม global variable เพื่อเก็บข้อมูล recruiter ที่สุ่มมา
 
 
-
-
-selected_recruiter = None
-name_recruiter = None
-date_book = None
-# API 1: ดึงช่วงเวลาและเก็บ recruiter ที่สุ่มมา
-@app.post("/events/available-timeslots") 
-async def get_available_timeslots(request: DateRequest):
-    """
-    ดึงข้อมูลช่วงเวลาที่ว่างในวันที่ระบุ
-    แสดงเฉพาะช่วงเวลาว่างในระหว่าง 09:00 - 18:00 โดยแบ่งเป็นช่วงละ 30 นาที
-    และเก็บข้อมูล recruiter ที่สุ่มมาสำหรับใช้ใน API create-bulk
-    รองรับทั้ง LINE และ Facebook Messenger
-    """
-    start = timeTest.time()
-    print(f"[START] API started at {start:.6f}")
-    
-    # ใช้ฟังก์ชัน get_people เพื่อรับรายชื่ออีเมลผู้ใช้แยกตามประเภท M และ R
-    t1 = timeTest.time()
-    users_dict = get_people(
-        location=request.location
-    )
-    print(f"[LOG] get_people done in {timeTest.time() - t1:.3f}s")
-    
-    # กำหนดวันที่จะตรวจสอบ
-    date = datetime.fromisoformat(request.date).date()
-    start_datetime = datetime.combine(date, time(0, 0, 0)).astimezone(timezone.utc)
-    end_datetime = datetime.combine(date, time(23, 59, 59)).astimezone(timezone.utc)
-    
-    time_min = start_datetime.strftime("%Y-%m-%dT%H:%M:%SZ")
-    time_max = end_datetime.strftime("%Y-%m-%dT%H:%M:%SZ")
-    
-    # ดึงข้อมูลกิจกรรมสำหรับ Recruiter
-    t3 = timeTest.time()
-    recruiters_events = {}
-    for user_info in users_dict['R']:
-        email = user_info["Email"]
-        name = user_info["Name"]
-        calendar_id = email
-        
-        if is_token_valid(email):
-            try:
-                # ดึง token จาก DB
-                token_entry = get_token(email)
-                creds = Credentials(
-                    token=token_entry.access_token,
-                    refresh_token=token_entry.refresh_token,
-                    token_uri="https://oauth2.googleapis.com/token",
-                    client_id=CLIENT_ID,
-                    client_secret=CLIENT_SECRET,
-                    scopes=SCOPES
-                )
-                service = build('calendar', 'v3', credentials=creds)
-                
-                events_result = service.events().list(
-                    calendarId=calendar_id,
-                    timeMin=time_min,
-                    timeMax=time_max,
-                    singleEvents=True,
-                    orderBy='startTime'
-                ).execute()
-                
-                events = events_result.get('items', [])
-                
-                # เก็บข้อมูลกิจกรรม
-                recruiters_events[email] = {
-                    'name': name,
-                    'events': events
-                }
-            except Exception as e:
-                print(f"เกิดข้อผิดพลาดในการดึงข้อมูลสำหรับ R: {email}: {str(e)}")
-        else:
-            print(f"ผู้ใช้ {email} ยังไม่ได้ยืนยันตัวตน")
-    print(f"[LOG] get_recruiters_events done in {timeTest.time() - t3:.3f}s")
-    
-    # สุ่มเลือก recruiter และเก็บไว้ใน global variable (เก็บได้แค่คนเดียว)
-    if recruiters_events:
-        random_recruiter = random.choice(list(recruiters_events.items()))
-        recruiter_email = random_recruiter[0]
-        recruiter_name = random_recruiter[1]['name']
-        
-        # ตรวจสอบว่า recruiter ที่สุ่มมาแตกต่างจากที่เก็บไว้หรือไม่
-        global selected_recruiter
-        global name_recruiter
-        global date_book
-        thai_date = create_thai_date_label(request.date)
-        name_recruiter = recruiter_name
-        date_book = thai_date
-        selected_recruiter = {
-                'email': recruiter_email,
-                'name': recruiter_name,
-                'timestamp': datetime.now().isoformat()
-            }
-            
-        print(f"[LOG] Updated selected recruiter: {recruiter_name} ({recruiter_email})")
-
-    else:
-        # สร้าง response สำหรับกรณีไม่พบ recruiter
-        line_message = {
-            "type": "text",
-            "text": "ขออภัย ไม่พบ recruiter ที่ใช้งานได้ในขณะนี้"
-        }
-        
-        facebook_message = {
-            "text": "ขออภัย ไม่พบ recruiter ที่ใช้งานได้ในขณะนี้"
-        }
-        
-        return JSONResponse(
-            content={
-                "message": "ไม่พบ recruiter ที่ใช้งานได้",
-                "line_payload": [line_message],
-                "facebook_payload": [facebook_message]
-            },
-            headers={"Response-Type": "object"}
-        )
-    
-    # เก็บช่วงเวลาว่างและนับจำนวนคู่ที่ว่าง
-    available_timeslots = []
-    
-    # สร้างช่วงเวลาทุกๆ 30 นาที
-    t4 = timeTest.time()
-    for hour in range(9, 18):
-        for minute in [0, 30]:
-            slot_start = datetime.combine(date, time(hour, minute)).astimezone(timezone.utc)
-            slot_end = (slot_start + timedelta(minutes=30)).astimezone(timezone.utc)
-            
-            # แปลงเป็นเวลาท้องถิ่นเพื่อแสดงผล
-            local_start = slot_start.astimezone().strftime("%H:%M")
-            local_end = slot_end.astimezone().strftime("%H:%M")
-            time_slot_key = f"{local_start}-{local_end}"
-            
-            # ตรวจสอบคู่ที่ว่าง (ใช้ recruiter ที่สุ่มมาเท่านั้น)
-            available_recuiter_count = 0
-            available_recuiter = []
-            
-            recruiter_events = random_recruiter[1]['events']
-            recruiter_name = random_recruiter[1]['name']
-            
-            # ตรวจสอบว่าทั้งคู่ว่างหรือไม่
-            recruiter_is_available = is_available(recruiter_events, slot_start, slot_end)
-            
-            if recruiter_is_available:
-                available_recuiter_count += 1
-                # เพิ่มข้อมูลคู่ที่ว่าง
-                available_recuiter.append({
-                    "recruiter": f"{recruiter_name}"
-                })
-            
-            # เก็บข้อมูลช่วงเวลาที่มีคู่ว่างอย่างน้อย 1 คู่
-            if available_recuiter_count > 0:
-                available_timeslots.append({
-                    "time_slot": time_slot_key,
-                    "available_recuiter_count": available_recuiter_count,
-                    "available_recuiter": available_recuiter
-                })
-    print(f"[LOG] find_available_time_slots done in {timeTest.time() - t4:.3f}s")            
-  
-    # แปลงข้อมูลเพื่อสร้างข้อความและปุ่มสำหรับ LINE และ Facebook
-    slot_texts = []
-    
-    # สร้างรูปแบบวันที่แบบไทย
-    thai_date = create_thai_date_label(request.date)
-    
-    # เตรียมข้อมูลสำหรับปุ่ม quick reply
-    slot_items = []
-    slot_texts = []
-    for i, slot in enumerate(available_timeslots[:12], start=1):
-        time_slot = slot["time_slot"]
-        slot_text = f"🕒 {i}. เวลา {time_slot}"
-        slot_texts.append(slot_text)
-        
-        # เพิ่มข้อมูลสำหรับปุ่ม (ใช้ช่วงเวลาเป็น label และ text)
-        slot_items.append((time_slot, time_slot))
-
-    # สร้างปุ่ม quick reply สำหรับ LINE
-    line_items = create_line_quick_reply_items(slot_items, max_items=12, add_back_button=True)
-    
-    # สร้างปุ่ม quick reply สำหรับ Facebook
-    facebook_items = create_facebook_quick_replies(slot_items, max_items=12, add_back_button=True)
-
-    # สร้างข้อความ
-    message_text = f"📅 วันที่ : {thai_date}\n🗓️ กรุณาเลือกช่วงเวลาที่ต้องการ" 
-
-    # สร้างข้อความสำหรับ LINE
-    line_message = {
-        "type": "text",
-        "text": message_text,
-        "quickReply": {
-            "items": line_items
-        }
-    }
-    
-    # สร้างข้อความสำหรับ Facebook
-    facebook_message = {
-        "text": message_text,
-        "quick_replies": facebook_items
-    }
-    
-    response = {
-        "line_payload": [line_message],
-        "facebook_payload": [facebook_message],
-        "date": request.date,
-        "recruiter_name": f"{recruiter_name}"
-    }
-    
-    print(f"[LOG] API done at {timeTest.time() - start:.3f}s")
-    
-    return JSONResponse(
-        content=response,
-        headers={
-            "Response-Type": "object",
-            "Recruiter": f"{recruiter_name}"}
-    )
-
-
-# API 2: สร้างการนัดหมายโดยใช้ recruiter ที่เก็บไว้
-@app.post("/events/create-bulk")
-def create_bulk_events(event_request: BulkEventRequestUpdated):
-    """สร้างการนัดหมายโดยใช้ recruiter ที่เก็บไว้จาก API timeslot"""
-    start = timeTest.time()
-    
-    thai_date = create_thai_date_label(event_request.date)
-    # แมปสถานที่จากภาษาไทยเป็นภาษาอังกฤษ
-    location_mapping = {
-        "สีลม": "Silom",
-        "อโศก": "Asoke", 
-        "ภูเก็ต": "Phuket",
-        "พัทยา": "Pattaya",
-        "สมุย": "Samui",
-        "หัวหิน": "Huahin",
-        "เชียงใหม่": "Chiangmai"
-    }
-    
-    try:
-        # แปลงสถานที่จากภาษาไทยเป็นภาษาอังกฤษ
-        english_location = location_mapping.get(event_request.location, event_request.location)
-        
-        # แปลงเวลาให้เป็นรูปแบบ ISO
-        try:
-            start_time, end_time = convert_to_iso_format(event_request.date, event_request.time)
-        except ValueError as e:
-            line_message = {
-                "type": "text",
-                "text": f"รูปแบบวันที่หรือเวลาไม่ถูกต้อง: {str(e)}"
-            }
-            facebook_message = {
-                "text": f"รูปแบบวันที่หรือเวลาไม่ถูกต้อง: {str(e)}"
-            }
-            
-            return JSONResponse(
-                content={
-                    "message": "รูปแบบวันที่หรือเวลาไม่ถูกต้อง",
-                    "error": str(e),
-                    "line_payload": [line_message],
-                    "facebook_payload": [facebook_message]
-                },
-                headers={"Response-Type": "object"}
-            )
-        
-        # สร้าง session_key เพื่อดึงข้อมูล recruiter ที่เก็บไว้
-        global selected_recruiter
-        
-        # ดึงข้อมูล recruiter ที่เก็บไว้
-        if selected_recruiter is None:
-            line_message = {
-                "type": "text",
-                "text": "ไม่พบข้อมูล recruiter ที่เลือกไว้ กรุณาเลือกเวลาใหม่"
-            }
-            facebook_message = {
-                "text": "ไม่พบข้อมูล recruiter ที่เลือกไว้ กรุณาเลือกเวลาใหม่"
-            }
-            
-            return JSONResponse(
-                content={
-                    "message": "ไม่พบข้อมูล recruiter ที่เลือกไว้",
-                    "error": "กรุณาเรียก API timeslot ก่อนสร้างนัดหมาย",
-                    "line_payload": [line_message],
-                    "facebook_payload": [facebook_message]
-                },
-                headers={"Response-Type": "object"}
-            )
-        
-        # ใช้ข้อมูล recruiter ที่เก็บไว้
-        user_email = selected_recruiter['email']
-        user_name = selected_recruiter['name']
-        
-        print(f"[LOG] Using saved recruiter: {user_name} ({user_email})")
-        
-        # ตรวจสอบว่าผู้ใช้ได้ยืนยันตัวตนแล้วหรือไม่
-        if not is_token_valid(user_email):
-            line_message = {
-                "type": "text",
-                "text": "ไม่สามารถสร้างการนัดหมายได้ เนื่องจากผู้ใช้ยังไม่ได้ยืนยันตัวตน"
-            }
-            facebook_message = {
-                "text": "ไม่สามารถสร้างการนัดหมายได้ เนื่องจากผู้ใช้ยังไม่ได้ยืนยันตัวตน"
-            }
-            
-            return JSONResponse(
-                content={
-                    "message": "ผู้ใช้ยังไม่ได้ยืนยันตัวตน",
-                    "invalid_user": user_email,
-                    "line_payload": [line_message],
-                    "facebook_payload": [facebook_message]
-                },
-                headers={"Response-Type": "object"}
-            )
-            
-        # รับ credentials ของผู้ใช้
-        token_entry = get_token(user_email)
-        creds = Credentials(
-            token=token_entry.access_token,
-            refresh_token=token_entry.refresh_token,
-            token_uri="https://oauth2.googleapis.com/token",
-            client_id=CLIENT_ID,
-            client_secret=CLIENT_SECRET,
-            scopes=SCOPES
-        )
-        
-        # สร้าง service สำหรับผู้ใช้
-        service = build('calendar', 'v3', credentials=creds)
-        
-        # ตรวจสอบว่ามีกิจกรรมซ้ำซ้อนในช่วงเวลาเดียวกันหรือไม่
-        time_min = start_time
-        time_max = end_time
-        
-        # ตรวจสอบปฏิทินของผู้ใช้
-        events_result = service.events().list(
-            calendarId='primary',
-            timeMin=time_min,
-            timeMax=time_max,
-            singleEvents=True,
-            orderBy='startTime'
-        ).execute()
-        events = events_result.get('items', [])
-        
-        # ถ้ามีกิจกรรมในช่วงเวลาเดียวกัน ให้แจ้งเตือนและยกเลิกการสร้างนัดหมาย
-        if events:
-            conflict_events = []
-            
-            # รวบรวมรายการกิจกรรมที่ซ้ำซ้อน
-            for event in events:
-                conflict_events.append({
-                    'title': event.get('summary', 'ไม่มีชื่อ'),
-                    'start': event.get('start', {}).get('dateTime', ''),
-                    'end': event.get('end', {}).get('dateTime', ''),
-                    'calendar_owner': user_email
-                })
-            
-            # สร้าง Response สำหรับกรณีที่มีกิจกรรมซ้ำซ้อน
-            line_message = {
-                "type": "text",
-                "text": f"ขออภัย ไม่สามารถทำการสร้างนัดได้เนื่องจากมีกิจกรรมอยู่แล้ว"
-            }
-            facebook_message = {
-                "text": f"ขออภัย ไม่สามารถทำการสร้างนัดได้เนื่องจากมีกิจกรรมอยู่แล้ว"
-            }
-            
-            return JSONResponse(
-                content={
-                    "message": "มีกิจกรรมซ้ำซ้อนในช่วงเวลาเดียวกัน",
-                    "conflict_events": conflict_events,
-                    "line_payload": [line_message],
-                    "facebook_payload": [facebook_message]
-                },
-                headers={"Response-Type": "object"}
-            )
-        
-        # เตรียมรายชื่อผู้เข้าร่วมเพิ่มเติม
-        additional_attendees = []
-        if event_request.attendees:
-            additional_attendees = [{'email': email} for email in event_request.attendees]
-        
-        # กำหนดชื่อหัวข้อตามรูปแบบที่ต้องการ
-        event_summary = f"Onsite Interview : K.{user_name}-{english_location}"
-        
-        # เตรียมข้อมูลกิจกรรม
-        event_data = {
-            'summary': event_summary,
-            'location': english_location,
-            'start': {
-                'dateTime': start_time,
-                'timeZone': 'Asia/Bangkok',
-            },
-            'end': {
-                'dateTime': end_time,
-                'timeZone': 'Asia/Bangkok',
-            },
-            'reminders': {
-                'useDefault': False,
-                'overrides': [
-                    {'method': 'popup', 'minutes': 10}
-                ]
-            },
-            'guestsCanSeeOtherGuests': True,
-            'guestsCanModify': False,
-            'sendUpdates': 'all'
-        }
-        
-        # ผลลัพธ์การดำเนินการ
-        results = []
-        
-        # สร้างการนัดหมายโดยใช้อีเมลที่หาได้เป็น organizer
-        try:
-            # เพิ่มผู้เข้าร่วม (รวมถึง organizer และผู้เข้าร่วมเพิ่มเติม)
-            attendees = [
-                {'email': user_email, 'responseStatus': 'accepted', 'organizer': True}
-            ] + additional_attendees
-            event_data['attendees'] = attendees
-            
-            # สร้างกิจกรรมในปฏิทิน
-            created_event = service.events().insert(
-                calendarId="primary",
-                body=event_data
-            ).execute()
-            
-            results.append({
-                'email': user_email,
-                'name': user_name,
-                'success': True,
-                'message': 'สร้างการนัดหมายสำเร็จ',
-                'event_id': created_event['id'],
-                'html_link': created_event['htmlLink']
-            })
-            
-            # ลบข้อมูล recruiter ที่เก็บไว้หลังจากใช้งานเสร็จ (ไม่ลบ เก็บไว้ใช้ต่อ)
-            # selected_recruiter = None
-            # print(f"[LOG] Kept recruiter data for future use")
-            
-        except Exception as e:
-            print(f"เกิดข้อผิดพลาดในการสร้างการนัดหมาย: {str(e)}")
-            results.append({
-                'email': user_email,
-                'name': user_name,
-                'success': False,
-                'message': f'เกิดข้อผิดพลาด: {str(e)}'
-            })
-            
-            # สร้าง Response สำหรับกรณีเกิดข้อผิดพลาด
-            line_message = {
-                "type": "text",
-                "text": f"เกิดข้อผิดพลาดในการสร้างการนัดหมาย: {str(e)}"
-            }
-            facebook_message = {
-                "text": f"เกิดข้อผิดพลาดในการสร้างการนัดหมาย: {str(e)}"
-            }
-            
-            print(f"[DEBUG] API done at {timeTest.time() - start:.3f}s")
-            return JSONResponse(
-                content={
-                    "message": "เกิดข้อผิดพลาดในการสร้างการนัดหมาย",
-                    "error": str(e),
-                    "line_payload": [line_message],
-                    "facebook_payload": [facebook_message]
-                },
-                headers={"Response-Type": "object"}
-            )
-        
-        # สร้าง Response แบบ text ธรรมดา
-        success_text = f"✅สร้างนัดใน Calendar เรียบร้อย\n{event_summary}\n📅วัน : {thai_date}\n🕒เวลา : {event_request.time} น.\n👤Recruiter: K.{user_name}"
-        
-        line_message = {
-            "type": "text",
-            "text": success_text
-        }
-        facebook_message = {
-            "text": success_text
-        }
-        
-        # คืนค่าข้อมูลพร้อมกับ Response Object
-        print(f"[DEBUG] API done at {timeTest.time() - start:.3f}s")
-        return JSONResponse(
-            content={
-                "message": f"ดำเนินการสร้างการนัดหมายสำหรับ K. {user_name} ({user_email})",
-                "results": results,
-                "line_payload": [line_message],
-                "facebook_payload": [facebook_message]
-            },
-            headers={"Response-Type": "object"}
-        )
-            
-    except Exception as e:
-        # สร้าง Response สำหรับกรณีเกิดข้อผิดพลาด
-        line_message = {
-            "type": "text",
-            "text": f"เกิดข้อผิดพลาดในการสร้างการนัดหมาย: {str(e)}"
-        }
-        facebook_message = {
-            "text": f"เกิดข้อผิดพลาดในการสร้างการนัดหมาย: {str(e)}"
-        }
-        
-        print(f"[DEBUG] API done at {timeTest.time() - start:.3f}s")
-        return JSONResponse(
-            content={
-                "message": "เกิดข้อผิดพลาดในการสร้างการนัดหมาย",
-                "error": str(e),
-                "line_payload": [line_message],
-                "facebook_payload": [facebook_message]
-            },
-            headers={"Response-Type": "object"}
-        )
-
-@app.get("/selected-recruiter")
-def get_selected_recruiter():
-    """ดูข้อมูล recruiter ที่เก็บไว้ (สำหรับ debug)"""
-    return {
-        "selected_recruiter": selected_recruiter,
-        "has_recruiter": selected_recruiter is not None,
-        "recruiter": name_recruiter,
-        "date": date_book
-    }
 #login
 # API 3: Login - ดึงข้อมูลผู้ใช้และยืนยันตัวตน
 @app.get("/events/{user_email}")
@@ -2484,3 +1958,486 @@ async def auth_redirect(request: Request, auth_url: str, email: str = None):
             "email": email
         }
     )
+
+
+
+
+
+
+
+
+#-------------------------------------- Test ---------------------------------------
+# API 1: สุ่ม Recruiter ที่ว่างในวันที่ระบุ
+@app.post("/date-convert")
+async def date_convert(request: DateConvert):
+    thai_date = create_thai_date_label(request.date)
+    return {"thai_date": thai_date}
+    
+@app.post("/select-recruiter-test")
+async def select_available_recruiter_test(request: RecruiterRequest):
+    """
+    สุ่มเลือก recruiter ที่ว่างในวันที่ระบุ
+    รับค่า: date, location
+    ส่งกลับ: ข้อมูล recruiter (name, email) ที่ว่างในวันนั้น
+    """
+    
+    start = timeTest.time()
+    print(f"[START] Select recruiter API started at {start:.6f}")
+    
+    # ใช้ฟังก์ชัน get_people เพื่อรับรายชื่ออีเมลผู้ใช้แยกตามประเภท M และ R
+    t1 = timeTest.time()
+    users_dict = get_people(location=request.location)
+    print(f"[LOG] get_people done in {timeTest.time() - t1:.3f}s")
+    
+    # กำหนดวันที่จะตรวจสอบ
+    date = datetime.fromisoformat(request.date).date()
+    start_datetime = datetime.combine(date, time(0, 0, 0)).astimezone(timezone.utc)
+    end_datetime = datetime.combine(date, time(23, 59, 59)).astimezone(timezone.utc)
+    
+    time_min = start_datetime.strftime("%Y-%m-%dT%H:%M:%SZ")
+    time_max = end_datetime.strftime("%Y-%m-%dT%H:%M:%SZ")
+    
+    # ดึงข้อมูลกิจกรรมสำหรับ Recruiter และเช็คว่าใครว่างบ้าง แบบ concurrent
+    t3 = timeTest.time()
+    available_recruiters = []
+    
+    # ใช้ ThreadPoolExecutor เพื่อประมวลผลแบบ concurrent
+    max_workers = min(len(users_dict['R']), 5)  # จำกัดไม่เกิน 5 threads
+    
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # สร้าง futures สำหรับแต่ละ recruiter
+        future_to_user = {
+            executor.submit(check_recruiter_availability, user_info, date, time_min, time_max): user_info
+            for user_info in users_dict['R']
+        }
+        
+        # รวบรวมผลลัพธ์
+        for future in concurrent.futures.as_completed(future_to_user):
+            user_info = future_to_user[future]
+            try:
+                result = future.result()
+                if result is not None:
+                    available_recruiters.append(result)
+            except Exception as exc:
+                print(f"เกิดข้อผิดพลาดในการประมวลผลสำหรับ {user_info['Email']}: {exc}")
+    
+    print(f"[LOG] concurrent check_available_recruiters done in {timeTest.time() - t3:.3f}s")
+    
+    # สุ่มเลือก recruiter จากรายการที่ว่าง
+    if available_recruiters:
+        selected_recruiter = random.choice(available_recruiters)
+        thai_date = create_thai_date_label(request.date)
+        
+        print(f"[LOG] Selected recruiter: {selected_recruiter['name']} ({selected_recruiter['email']})")
+        
+        response = {
+            "success": True,
+            "date": request.date,
+            "thai_date": thai_date,
+            "location": request.location,
+            "email": selected_recruiter['email'],
+            "name": selected_recruiter['name']
+        }
+        print(f"Recruiter : {selected_recruiter['email']}")
+        print(f"[LOG] Select recruiter API done in {timeTest.time() - start:.3f}s")
+        
+        return JSONResponse(
+            content=response
+        )
+    else:
+        # ไม่พบ recruiter ที่ว่าง
+        response = {
+            "success": False,
+            "message": "ไม่พบ recruiter ที่ว่างในวันที่ระบุ",
+            "date": request.date,
+            "location": request.location
+        }
+        
+        return JSONResponse(
+            content=response,
+            status_code=404
+        )   
+# API 2: ดึงช่วงเวลาว่างของ recruiter ที่ระบุ (แก้ไขจาก API เดิม)
+@app.post("/events/available-timeslots-test")
+async def get_available_timeslots_test(request: TimeslotRequest):
+    """
+    ดึงข้อมูลช่วงเวลาที่ว่างของ recruiter ที่ระบุในวันที่กำหนด
+    แสดงเฉพาะช่วงเวลาว่างในระหว่าง 09:00 - 18:00 โดยแบ่งเป็นช่วงละ 30 นาที
+    รองรับทั้ง LINE และ Facebook Messenger
+    หมายเหตุ: ตัด validation ออกเพราะ API select-recruiter ได้เช็คแล้ว
+    """
+    start = timeTest.time()
+    print(f"[START] Available timeslots API started at {start:.6f}")
+    
+    # กำหนดวันที่จะตรวจสอบ
+    date = datetime.fromisoformat(request.date).date()
+    start_datetime = datetime.combine(date, time(0, 0, 0)).astimezone(timezone.utc)
+    end_datetime = datetime.combine(date, time(23, 59, 59)).astimezone(timezone.utc)
+    
+    time_min = start_datetime.strftime("%Y-%m-%dT%H:%M:%SZ")
+    time_max = end_datetime.strftime("%Y-%m-%dT%H:%M:%SZ")
+    
+    # ดึงข้อมูลกิจกรรมสำหรับ Recruiter ที่ระบุ (ไม่เช็ค validation เพราะเช็คใน API แรกแล้ว)
+    t3 = timeTest.time()
+    recruiter_email = request.recruiter_email
+    recruiter_name = recruiter_email.split('@')[0]  # ใช้ชื่อจาก email เป็น fallback
+    recruiter_events = []
+    
+    try:
+        # ดึง token จาก DB
+        token_entry = get_token(recruiter_email)
+        creds = Credentials(
+            token=token_entry.access_token,
+            refresh_token=token_entry.refresh_token,
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=CLIENT_ID,
+            client_secret=CLIENT_SECRET,
+            scopes=SCOPES
+        )
+        service = build('calendar', 'v3', credentials=creds)
+        
+        events_result = service.events().list(
+            calendarId=recruiter_email,
+            timeMin=time_min,
+            timeMax=time_max,
+            singleEvents=True,
+            orderBy='startTime'
+        ).execute()
+        
+        recruiter_events = events_result.get('items', [])
+        
+    except Exception as e:
+        print(f"เกิดข้อผิดพลาดในการดึงข้อมูลสำหรับ recruiter: {recruiter_email}: {str(e)}")
+        # ถ้าเกิด error ก็ให้ recruiter_events เป็น list ว่าง จะได้แสดงทุกช่วงเวลาเป็นว่าง
+        recruiter_events = []
+    
+    print(f"[LOG] get_recruiter_events done in {timeTest.time() - t3:.3f}s")
+    
+    # หาช่วงเวลาว่าง
+    available_timeslots = []
+    
+    # สร้างช่วงเวลาทุกๆ 30 นาที
+    t4 = timeTest.time()
+    for hour in range(9, 18):
+        for minute in [0, 30]:
+            slot_start = datetime.combine(date, time(hour, minute)).astimezone(timezone.utc)
+            slot_end = (slot_start + timedelta(minutes=30)).astimezone(timezone.utc)
+            
+            # แปลงเป็นเวลาท้องถิ่นเพื่อแสดงผล
+            local_start = slot_start.astimezone().strftime("%H:%M")
+            local_end = slot_end.astimezone().strftime("%H:%M")
+            time_slot_key = f"{local_start}-{local_end}"
+            
+            # ตรวจสอบว่า recruiter ว่างหรือไม่
+            if is_available(recruiter_events, slot_start, slot_end):
+                available_timeslots.append({
+                    "time_slot": time_slot_key,
+                    "recruiter": recruiter_name
+                })
+    
+    print(f"[LOG] find_available_time_slots done in {timeTest.time() - t4:.3f}s")
+    
+    # สร้างรูปแบบวันที่แบบไทย
+    thai_date = create_thai_date_label(request.date)
+    
+    # เตรียมข้อมูลสำหรับปุ่ม quick reply
+    slot_items = []
+    for i, slot in enumerate(available_timeslots[:12], start=1):
+        time_slot = slot["time_slot"]
+        # เพิ่มข้อมูลสำหรับปุ่ม (ใช้ช่วงเวลาเป็น label และ text)
+        slot_items.append((time_slot, time_slot))
+
+    # สร้างปุ่ม quick reply สำหรับ LINE และ Facebook
+    line_items = create_line_quick_reply_items(slot_items, max_items=12, add_back_button=True)
+    facebook_items = create_facebook_quick_replies(slot_items, max_items=12, add_back_button=True)
+
+    # สร้างข้อความ
+    message_text = f"📅 วันที่ : {thai_date}\n🗓️ กรุณาเลือกช่วงเวลาที่ต้องการ"
+
+    # สร้างข้อความสำหรับ LINE
+    line_message = {
+        "type": "text",
+        "text": message_text,
+        "quickReply": {
+            "items": line_items
+        }
+    }
+    
+    # สร้างข้อความสำหรับ Facebook
+    facebook_message = {
+        "text": message_text,
+        "quick_replies": facebook_items
+    }
+    
+    response = {
+        "line_payload": [line_message],
+        "facebook_payload": [facebook_message],
+        "date": request.date,
+        "recruiter_email": recruiter_email,
+        "recruiter_name": recruiter_name,
+        "available_slots_count": len(available_timeslots)
+    }
+    
+    print(f"[LOG] Available timeslots API done in {timeTest.time() - start:.3f}s")
+    
+    return JSONResponse(
+        content=response,
+        headers={
+            "Response-Type": "object"
+        }
+    )
+    
+# API 3: สร้างการนัดหมาย (แก้ไขใหม่ - ใช้อีเมลโดยตรง)
+@app.post("/events/create-bulk-test")
+def create_bulk_events_test(event_request: BulkEventRequest):
+    """สร้างการนัดหมายโดยใช้อีเมลที่ระบุโดยตรง และใช้ name2 ในการตั้งหัวข้อการประชุม (เวอร์ชัน test)"""
+    start = timeTest.time()
+    thai_date = create_thai_date_label(event_request.date)
+    # แมปสถานที่จากภาษาไทยเป็นภาษาอังกฤษ
+    location_mapping = {
+        "สีลม": "Silom",
+        "อโศก": "Asoke", 
+        "ภูเก็ต": "Phuket",
+        "พัทยา": "Pattaya",
+        "สมุย": "Samui",
+        "หัวหิน": "Huahin",
+        "เชียงใหม่": "Chiangmai"
+    }
+    
+    try:
+        # แปลงสถานที่จากภาษาไทยเป็นภาษาอังกฤษ
+        english_location = location_mapping.get(event_request.location, event_request.location)
+        
+        # แปลงเวลาให้เป็นรูปแบบ ISO
+        try:
+            start_time, end_time = convert_to_iso_format(event_request.date, event_request.time)
+        except ValueError as e:
+            line_response = {
+                "type": "text",
+                "text": f"รูปแบบวันที่หรือเวลาไม่ถูกต้อง: {str(e)}"
+            }
+            facebook_response = {
+                "text": f"รูปแบบวันที่หรือเวลาไม่ถูกต้อง: {str(e)}"
+            }
+            
+            return JSONResponse(
+                content={
+                    "message": "รูปแบบวันที่หรือเวลาไม่ถูกต้อง",
+                    "error": str(e),
+                    "line_payload": [line_response],
+                    "facebook_payload": [facebook_response]
+                },
+                headers={"Response-Type": "object"}
+            )
+        
+        # ใช้อีเมลและชื่อที่ส่งมาโดยตรง
+        user_email = event_request.email
+        user_name = event_request.name2
+        
+        # ตรวจสอบว่าผู้ใช้ได้ยืนยันตัวตนแล้วหรือไม่
+        if not is_token_valid(user_email):
+            line_response = {
+                "type": "text",
+                "text": "ไม่สามารถสร้างการนัดหมายได้ เนื่องจากผู้ใช้ยังไม่ได้ยืนยันตัวตน"
+            }
+            facebook_response = {
+                "text": "ไม่สามารถสร้างการนัดหมายได้ เนื่องจากผู้ใช้ยังไม่ได้ยืนยันตัวตน"
+            }
+            
+            return JSONResponse(
+                content={
+                    "message": "ผู้ใช้ยังไม่ได้ยืนยันตัวตน",
+                    "invalid_user": user_email,
+                    "line_payload": [line_response],
+                    "facebook_payload": [facebook_response]
+                },
+                headers={"Response-Type": "object"}
+            )
+            
+        # รับ credentials ของผู้ใช้
+        token_entry = get_token(user_email)
+        creds = Credentials(
+            token=token_entry.access_token,
+            refresh_token=token_entry.refresh_token,
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=CLIENT_ID,
+            client_secret=CLIENT_SECRET,
+            scopes=SCOPES
+        )
+        
+        # สร้าง service สำหรับผู้ใช้
+        service = build('calendar', 'v3', credentials=creds)
+        
+        # ตรวจสอบว่ามีกิจกรรมซ้ำซ้อนในช่วงเวลาเดียวกันหรือไม่
+        time_min = start_time
+        time_max = end_time
+        
+        # ตรวจสอบปฏิทินของผู้ใช้
+        events_result = service.events().list(
+            calendarId='primary',
+            timeMin=time_min,
+            timeMax=time_max,
+            singleEvents=True,
+            orderBy='startTime'
+        ).execute()
+        events = events_result.get('items', [])
+        
+        # ถ้ามีกิจกรรมในช่วงเวลาเดียวกัน ให้แจ้งเตือนและยกเลิกการสร้างนัดหมาย
+        if events:
+            conflict_events = []
+            
+            # รวบรวมรายการกิจกรรมที่ซ้ำซ้อน
+            for event in events:
+                conflict_events.append({
+                    'title': event.get('summary', 'ไม่มีชื่อ'),
+                    'start': event.get('start', {}).get('dateTime', ''),
+                    'end': event.get('end', {}).get('dateTime', ''),
+                    'calendar_owner': user_email
+                })
+            
+            # สร้าง Line และ Facebook Response สำหรับกรณีที่มีกิจกรรมซ้ำซ้อn
+            line_response = {
+                "type": "text",
+                "text": f"ขออภัย ไม่สามารถทำการสร้างนัดได้เนื่องจากมีกิจกรรมอยู่แล้ว"
+            }
+            facebook_response = {
+                "text": f"ขออภัย ไม่สามารถทำการสร้างนัดได้เนื่องจากมีกิจกรรมอยู่แล้ว"
+            }
+            
+            return JSONResponse(
+                content={
+                    "message": "มีกิจกรรมซ้ำซ้อนในช่วงเวลาเดียวกัน",
+                    "conflict_events": conflict_events,
+                    "line_payload": [line_response],
+                    "facebook_payload": [facebook_response]
+                },
+                headers={"Response-Type": "object"}
+            )
+        
+        # เตรียมรายชื่อผู้เข้าร่วมเพิ่มเติม
+        additional_attendees = []
+        if event_request.attendees:
+            additional_attendees = [{'email': email} for email in event_request.attendees]
+        
+        # กำหนดชื่อหัวข้อตามรูปแบบที่ต้องการ (ใช้ name2)
+        event_summary = f"Onsite Interview : K. {user_name} - {english_location}"
+        
+        # เตรียมข้อมูลกิจกรรม
+        event_data = {
+            'summary': event_summary,
+            'location': english_location,
+            'start': {
+                'dateTime': start_time,
+                'timeZone': 'Asia/Bangkok',
+            },
+            'end': {
+                'dateTime': end_time,
+                'timeZone': 'Asia/Bangkok',
+            },
+            'reminders': {
+                'useDefault': False,
+                'overrides': [
+                    {'method': 'popup', 'minutes': 10}  # แจ้งเตือน 10 นาทีก่อนการประชุม
+                ]
+            },
+            'guestsCanSeeOtherGuests': True,
+            'guestsCanModify': False,
+            'sendUpdates': 'all'
+        }
+        
+        # ผลลัพธ์การดำเนินการ
+        results = []
+        
+        # สร้างการนัดหมายโดยใช้อีเมลที่ส่งมาเป็น organizer
+        try:
+            # เพิ่มผู้เข้าร่วม (รวมถึง organizer และผู้เข้าร่วมเพิ่มเติม)
+            attendees = [
+                {'email': user_email, 'responseStatus': 'accepted', 'organizer': True}
+            ] + additional_attendees
+            event_data['attendees'] = attendees
+            
+            # สร้างกิจกรรมในปฏิทิน
+            created_event = service.events().insert(
+                calendarId="primary",
+                body=event_data
+            ).execute()
+            
+            results.append({
+                'email': user_email,
+                'name': user_name,
+                'success': True,
+                'message': 'สร้างการนัดหมายสำเร็จ',
+                'event_id': created_event['id'],
+                'html_link': created_event['htmlLink']
+            })
+            
+        except Exception as e:
+            print(f"เกิดข้อผิดพลาดในการสร้างการนัดหมาย: {str(e)}")
+            results.append({
+                'email': user_email,
+                'name': user_name,
+                'success': False,
+                'message': f'เกิดข้อผิดพลาด: {str(e)}'
+            })  
+            
+            # สร้าง Line และ Facebook Response สำหรับกรณีเกิดข้อผิดพลาด
+            line_response = {
+                "type": "text",
+                "text": f"เกิดข้อผิดพลาดในการสร้างการนัดหมาย: {str(e)}"
+            }
+            facebook_response = {
+                "text": f"เกิดข้อผิดพลาดในการสร้างการนัดหมาย: {str(e)}"
+            }
+            
+            print(f"[DEBUG] API done at {timeTest.time() - start:.3f}s")
+            return JSONResponse(
+                content={
+                    "message": "เกิดข้อผิดพลาดในการสร้างการนัดหมาย",
+                    "error": str(e),
+                    "line_payload": [line_response],
+                    "facebook_payload": [facebook_response]
+                },
+                headers={"Response-Type": "object"}
+            )
+        
+        # สร้าง Line และ Facebook Response สำหรับการสร้างนัดสำเร็จ
+        line_response = create_appointment_success_flex_message(
+            event_summary, thai_date, event_request.time, user_name, user_email
+        )
+        
+        facebook_response = create_appointment_success_facebook_message(
+            event_summary, thai_date, event_request.time, user_name, user_email
+        )
+        
+        # คืนค่าข้อมูลพร้อมกับ Line และ Facebook Response Object
+        print(f"[DEBUG] API done at {timeTest.time() - start:.3f}s")
+        return JSONResponse(
+            content={
+                "message": f"ดำเนินการสร้างการนัดหมายสำหรับ K. {user_name} ({user_email})",
+                "results": results,
+                "line_payload": [line_response],
+                "facebook_payload": [facebook_response]
+            },
+            headers={"Response-Type": "object"}
+        )
+            
+    except Exception as e:
+        # สร้าง Line และ Facebook Response สำหรับกรณีเกิดข้อผิดพลาด
+        line_response = {
+            "type": "text",
+            "text": f"เกิดข้อผิดพลาดในการสร้างการนัดหมาย: {str(e)}"
+        }
+        facebook_response = {
+            "text": f"เกิดข้อผิดพลาดในการสร้างการนัดหมาย: {str(e)}"
+        }
+        
+        print(f"[DEBUG] API done at {timeTest.time() - start:.3f}s")
+        return JSONResponse(
+            content={
+                "message": "เกิดข้อผิดพลาดในการสร้างการนัดหมาย",
+                "error": str(e),
+                "line_payload": [line_response],
+                "facebook_payload": [facebook_response]
+            },
+            headers={"Response-Type": "object"}
+        )

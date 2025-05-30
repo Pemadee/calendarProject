@@ -18,11 +18,12 @@ class UsersRequest(BaseModel):
 
 
 class BulkEventRequest(BaseModel):
-    name2: str      # รับชื่อของ name2 อย่างเดียว
+    name2: str      # รับชื่อของ name2 สำหรับตั้งหัวข้อการประชุม
+    email: str      # อีเมลของผู้ที่จะสร้างนัด
     location: str   # เช่น "Silom", "Asoke" เป็นต้น
     date: str       # รูปแบบ "YYYY-MM-DD" เช่น "2025-05-27"
     time: str       # รูปแบบ "HH:MM-HH:MM" เช่น "09:30-10:00"
-    attendees: Optional[List[str]] = None  # รายชื่ออีเมลของผู้เข้าร่วมเพิ่มเติม
+    attendees: Optional[List[str]] = None  # รายชื่ออีเมลของผู้เข้าร่วมเพิ่มเติม    
 
 class BulkEventRequestUpdated(BaseModel):
     location: str
@@ -80,5 +81,13 @@ class TimeSlotRequest(BaseModel):
 class LocationRequest(BaseModel):
     location: str
 
+class TimeslotRequest(BaseModel):
+    date: str
+    recruiter_email: str
 
-
+class RecruiterRequest(BaseModel):
+    date: str
+    location: str
+    
+class DateConvert(BaseModel):
+    date: str

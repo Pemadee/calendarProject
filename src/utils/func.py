@@ -556,8 +556,6 @@ def convert_to_iso_format(date, time):
 
 
 
-
-
 def find_email_from_name(name, location):
     """
     รับชื่อของ name2 และ location เพื่อค้นหาอีเมลจาก Google Sheet
@@ -609,21 +607,80 @@ def find_email_from_name(name, location):
 
 #========================================== fot API date, timeslot, pairs ======================================
 import asyncio
-async def fetch_user_events(email, name, user_type, time_min, time_max):
+def check_recruiter_availability(user_info, date, time_min, time_max):
     """
-    ดึงข้อมูลกิจกรรมของผู้ใช้จาก Google Calendar API แบบ async
-    Args:
-        email: อีเมลของผู้ใช้
-        name: ชื่อของผู้ใช้
-        user_type: ประเภทของผู้ใช้ ('M' หรือ 'R')
-        time_min: เวลาเริ่มต้นในการดึงข้อมูล
-        time_max: เวลาสิ้นสุดในการดึงข้อมูล
-    Returns:
-        tuple: (email, dict) หรือ (email, None) ถ้าเกิดข้อผิดพลาด
+    เช็ค token และความว่างของ recruiter ในวันที่กำหนด
     """
+    email = user_info["Email"]
+    name = user_info["Name"]
+    calendar_id = email
+    
+    # เช็ค token validity
     if not is_token_valid(email):
         print(f"ผู้ใช้ {email} ยังไม่ได้ยืนยันตัวตน")
-        return email, None
+        return None
+    
+    try:
+        # ดึง token จาก DB
+        token_entry = get_token(email)
+        creds = Credentials(
+            token=token_entry.access_token,
+            refresh_token=token_entry.refresh_token,
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=CLIENT_ID,
+            client_secret=CLIENT_SECRET,
+            scopes=SCOPES
+        )
+        service = build('calendar', 'v3', credentials=creds)
+        
+        events_result = service.events().list(
+            calendarId=calendar_id,
+            timeMin=time_min,
+            timeMax=time_max,
+            singleEvents=True,
+            orderBy='startTime'
+        ).execute()
+        
+        events = events_result.get('items', [])
+        
+        # เช็คว่ามีช่วงเวลาว่างหรือไม่ (เช็คเบื้องต้นในช่วง 9-18 น.)
+        has_available_slots = False
+        for hour in range(9, 18):
+            for minute in [0, 30]:
+                slot_start = datetime.combine(date, time(hour, minute)).astimezone(timezone.utc)
+                slot_end = (slot_start + timedelta(minutes=30)).astimezone(timezone.utc)
+                
+                if is_available(events, slot_start, slot_end):
+                    has_available_slots = True
+                    break
+            if has_available_slots:
+                break
+        
+        # ถ้าว่าง ให้ return ข้อมูล recruiter
+        if has_available_slots:
+            return {
+                'email': email,
+                'name': name
+            }
+        else:
+            return None
+            
+    except Exception as e:
+        print(f"เกิดข้อผิดพลาดในการดึงข้อมูลสำหรับ R: {email}: {str(e)}")
+        return None
+# เพิ่มฟังก์ชันสำหรับ concurrent token checking
+def check_token_and_fetch_events(user_info, time_min, time_max):
+    """
+    เช็ค token และดึง events ในฟังก์ชันเดียว
+    """
+    email = user_info["Email"]
+    name = user_info["Name"]
+    calendar_id = email
+    
+    # เช็ค token validity
+    if not is_token_valid(email):
+        print(f"ผู้ใช้ {email} ยังไม่ได้ยืนยันตัวตน")
+        return None
     
     try:
         token_entry = get_token(email)
@@ -636,73 +693,27 @@ async def fetch_user_events(email, name, user_type, time_min, time_max):
             scopes=SCOPES
         )
         
-        # ใช้ loop executor เพื่อทำ I/O bound task แบบ non-blocking
-        loop = asyncio.get_event_loop()
         service = build('calendar', 'v3', credentials=creds)
         
-        events_result = await loop.run_in_executor(
-            None,
-            lambda: service.events().list(
-                calendarId=email,
-                timeMin=time_min,
-                timeMax=time_max,
-                singleEvents=True,
-                orderBy='startTime'
-            ).execute()
-        )
+        events_result = service.events().list(
+            calendarId=calendar_id,
+            timeMin=time_min,
+            timeMax=time_max,
+            singleEvents=True,
+            orderBy='startTime'
+        ).execute()
         
         events = events_result.get('items', [])
-        return email, {
+        
+        return {
+            'email': email,
             'name': name,
             'events': events
         }
+        
     except Exception as e:
-        print(f"เกิดข้อผิดพลาดในการดึงข้อมูลสำหรับ {user_type}: {email}: {str(e)}")
-        return email, None
-
-async def fetch_all_users_events(users_dict, time_min, time_max):
-    """
-    ดึงข้อมูลกิจกรรมของผู้ใช้ทั้งหมดแบบขนาน
-    Args:
-        users_dict: พจนานุกรมแยกประเภทของผู้ใช้ ('M' และ 'R')
-        time_min: เวลาเริ่มต้นในการดึงข้อมูล
-        time_max: เวลาสิ้นสุดในการดึงข้อมูล
-    Returns:
-        tuple: (dict, dict) เป็น (managers_events, recruiters_events)
-    """
-    start_time = timeTest.time()
-    
-    # สร้าง tasks สำหรับดึงข้อมูลทั้ง Manager และ Recruiter
-    all_tasks = []
-    
-    # เพิ่ม tasks ของ Manager
-    for user_info in users_dict['M']:
-        email = user_info["Email"]
-        name = user_info["Name"]
-        all_tasks.append(fetch_user_events(email, name, 'M', time_min, time_max))
-    
-    # เพิ่ม tasks ของ Recruiter
-    for user_info in users_dict['R']:
-        email = user_info["Email"]
-        name = user_info["Name"]
-        all_tasks.append(fetch_user_events(email, name, 'R', time_min, time_max))
-    
-    # รัน tasks ทั้งหมดพร้อมกันและรอผลลัพธ์
-    all_results = await asyncio.gather(*all_tasks)
-    
-    # แยกผลลัพธ์เป็น managers และ recruiters
-    managers_events = {}
-    recruiters_events = {}
-    
-    for email, data in all_results:
-        if data:  # กรองข้อมูลที่เป็น None ออก
-            if any(email == user_info["Email"] for user_info in users_dict['M']):
-                managers_events[email] = data
-            else:
-                recruiters_events[email] = data
-    
-    print(f"[LOG] Fetched all events in {timeTest.time() - start_time:.3f}s")
-    return managers_events, recruiters_events
+        print(f"เกิดข้อผิดพลาดในการดึงข้อมูลสำหรับ R: {email}: {str(e)}")
+        return None
 
 def is_available(events, start_time, end_time):
     """
@@ -873,3 +884,176 @@ def create_line_quick_reply_items(items_data, max_items=12, add_back_button=True
         })
     
     return items
+
+# ฟังก์ชันสำหรับสร้าง Flex Message สำหรับการสร้างนัดสำเร็จ
+def create_appointment_success_flex_message(event_summary, date, time, user_name, user_email):
+    """สร้าง LINE Flex Message สำหรับแจ้งการสร้างนัดสำเร็จ"""
+    return {
+        "type": "flex",
+        "altText": f"✅ สร้างนัดใน Calendar เรียบร้อย - K. {user_name}",
+        "contents": {
+            "type": "bubble",
+            "hero": {
+                "type": "box",
+                "layout": "vertical",
+                "contents": [
+                    {
+                        "type": "text",
+                        "text": "✅ การนัดหมายสำเร็จ",
+                        "weight": "bold",
+                        "size": "xl",
+                        "color": "#27AE60",
+                        "align": "center"
+                    }
+                ],
+                "backgroundColor": "#E8F8F5",
+                "paddingAll": "20px",
+                "spacing": "md"
+            },
+            "body": {
+                "type": "box",
+                "layout": "vertical",
+                "contents": [
+                    {
+                        "type": "box",
+                        "layout": "vertical",
+                        "contents": [
+                            {
+                                "type": "text",
+                                "text": "📋 รายละเอียดการนัดหมาย",
+                                "weight": "bold",
+                                "size": "lg",
+                                "color": "#2C3E50",
+                                "margin": "none"
+                            }
+                        ],
+                        "spacing": "sm",
+                        "margin": "lg"
+                    },
+                    {
+                        "type": "separator",
+                        "margin": "lg"
+                    },
+                    {
+                        "type": "box",
+                        "layout": "vertical",
+                        "contents": [
+                            {
+                                "type": "box",
+                                "layout": "horizontal",
+                                "contents": [
+                                    {
+                                        "type": "text",
+                                        "text": "🎯 หัวข้อ:",
+                                        "size": "sm",
+                                        "color": "#7F8C8D",
+                                        "flex": 2
+                                    },
+                                    {
+                                        "type": "text",
+                                        "text": event_summary,
+                                        "size": "sm",
+                                        "color": "#2C3E50",
+                                        "flex": 5,
+                                        "wrap": True,
+                                        "weight": "bold"
+                                    }
+                                ]
+                            },
+                            {
+                                "type": "box",
+                                "layout": "horizontal",
+                                "contents": [
+                                    {
+                                        "type": "text",
+                                        "text": "📅 วันที่:",
+                                        "size": "sm",
+                                        "color": "#7F8C8D",
+                                        "flex": 2
+                                    },
+                                    {
+                                        "type": "text",
+                                        "text": date,
+                                        "size": "sm",
+                                        "color": "#2C3E50",
+                                        "flex": 5,
+                                        "weight": "bold"
+                                    }
+                                ],
+                                "margin": "sm"
+                            },
+                            {
+                                "type": "box",
+                                "layout": "horizontal",
+                                "contents": [
+                                    {
+                                        "type": "text",
+                                        "text": "🕒 เวลา:",
+                                        "size": "sm",
+                                        "color": "#7F8C8D",
+                                        "flex": 2
+                                    },
+                                    {
+                                        "type": "text",
+                                        "text": f"{time} น.",
+                                        "size": "sm",
+                                        "color": "#2C3E50",
+                                        "flex": 5,
+                                        "weight": "bold"
+                                    }
+                                ],
+                                "margin": "sm"
+                            },
+                            {
+                                "type": "box",
+                                "layout": "horizontal",
+                                "contents": [
+                                    {
+                                        "type": "text",
+                                        "text": "👤 Recruiter:",
+                                        "size": "sm",
+                                        "color": "#7F8C8D",
+                                        "flex": 2
+                                    },
+                                    {
+                                        "type": "text",
+                                        "text": f"K. {user_name}",
+                                        "size": "sm",
+                                        "color": "#2C3E50",
+                                        "flex": 5,
+                                        "weight": "bold"
+                                    }
+                                ],
+                                "margin": "sm"
+                            }
+                        ],
+                        "spacing": "sm",
+                        "margin": "lg"
+                    }
+                ],
+                "spacing": "md"
+            },
+            "footer": {
+                "type": "box",
+                "layout": "vertical",
+                "contents": [
+                    {
+                        "type": "text",
+                        "text": "🎉 การนัดหมายถูกเพิ่มในปฏิทินเรียบร้อยแล้ว",
+                        "size": "xs",
+                        "color": "#95A5A6",
+                        "align": "center",
+                        "wrap": True
+                    }
+                ],
+                "margin": "sm"
+            }
+        }
+    }
+
+# ฟังก์ชันสำหรับสร้าง Facebook Message สำหรับการสร้างนัดสำเร็จ
+def create_appointment_success_facebook_message(event_summary, date, time, user_name, user_email):
+    """สร้าง Facebook Message สำหรับแจ้งการสร้างนัดสำเร็จ"""
+    return {
+        "text": f"✅ สร้างนัดใน Calendar เรียบร้อย\n\n📋 รายละเอียดการนัดหมาย:\n🎯 หัวข้อ: {event_summary}\n📅 วันที่: {date}\n🕒 เวลา: {time} น.\n👤 Recruiter: K. {user_name}\n\n🎉 การนัดหมายถูกเพิ่มในปฏิทินเรียบร้อยแล้ว"
+    }
