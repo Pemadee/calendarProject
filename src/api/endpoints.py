@@ -64,7 +64,7 @@ REDIRECT_URI = 'http://localhost:8000/'  # กำหนด redirect URI
 # ปอดการแจ้งเตือน INFO:googleapiclient.discovery_cache:file_cache is only supported with oauth2client<4.0.0
 logging.getLogger('googleapiclient.discovery_cache').setLevel(logging.ERROR)
 base_url = os.environ.get('BASE_URL')
-CLIENT_SECRET_FILE = os.getenv("CLIENT_SECRET_FILE2")
+CLIENT_SECRET_FILE = os.getenv("CLIENT_SECRET_FILE")
 
 @app.middleware("http")
 async def catch_all(request: Request, call_next):
@@ -166,6 +166,7 @@ def oauth2callback(code: str, state: str = None):
         </html>
         """, status_code=500)
 
+#================================================Old API appointment =============================================
 @app.post("/events/multiple")
 def get_multiple_users_events(request: UsersRequest):
     """ดึงข้อมูลกิจกรรมของผู้ใช้หลายคน (เฉพาะผู้ใช้ที่ยืนยันตัวตนแล้ว)"""
@@ -1055,926 +1056,10 @@ def get_available_dates(request: LocationRequest):
         content=response,
         headers={"Response-Type": "object"}
     )
-# API 2: ดึงช่วงเวลาและคู่ในวันที่เลือก
-# @app.post("/events/available-timeslots") 
-# async def get_available_timeslots(request: DateRequest):
-#     """
-#     ดึงข้อมูลช่วงเวลาที่ว่างในวันที่ระบุ
-#     แสดงเฉพาะช่วงเวลาว่างในระหว่าง 09:00 - 18:00 โดยแบ่งเป็นช่วงละ 30 นาที
-#     """
-#     start = timeTest.time()
-#     print(f"[START] API started at {start:.6f}")
-    
-#     # ใช้ฟังก์ชัน get_people เพื่อรับรายชื่ออีเมลผู้ใช้แยกตามประเภท M และ R
-#     t1 = timeTest.time()
-#     users_dict = get_people(
-#         location=request.location
-#     )
-#     print(f"[LOG] get_people done in {timeTest.time() - t1:.3f}s")
-    
-#     # กำหนดวันที่จะตรวจสอบ
-#     date = datetime.fromisoformat(request.date).date()
-#     start_datetime = datetime.combine(date, time(0, 0, 0)).astimezone(timezone.utc)
-#     end_datetime = datetime.combine(date, time(23, 59, 59)).astimezone(timezone.utc)
-    
-#     time_min = start_datetime.strftime("%Y-%m-%dT%H:%M:%SZ")
-#     time_max = end_datetime.strftime("%Y-%m-%dT%H:%M:%SZ")
-    
-#     # ดึงข้อมูลกิจกรรมสำหรับ Recruiter
- 
-#     t3 = timeTest.time()
-#     recruiters_events = {}
-#     for user_info in users_dict['R']:
-#         email = user_info["Email"]
-#         name = user_info["Name"]
-#         calendar_id = email
-        
-#         if is_token_valid(email):
-#             try:
-#                 # ดึง token จาก DB
-#                 token_entry = get_token(email)
-#                 creds = Credentials(
-#                     token=token_entry.access_token,
-#                     refresh_token=token_entry.refresh_token,
-#                     token_uri="https://oauth2.googleapis.com/token",
-#                     client_id=CLIENT_ID,
-#                     client_secret=CLIENT_SECRET,
-#                     scopes=SCOPES
-#                 )
-#                 service = build('calendar', 'v3', credentials=creds)
-                
-#                 events_result = service.events().list(
-#                     calendarId=calendar_id,
-#                     timeMin=time_min,
-#                     timeMax=time_max,
-#                     singleEvents=True,
-#                     orderBy='startTime'
-#                 ).execute()
-                
-#                 events = events_result.get('items', [])
-                
-#                 # เก็บข้อมูลกิจกรรม
-#                 recruiters_events[email] = {
-#                     'name': name,
-#                     'events': events
-#                 }
-#             except Exception as e:
-#                 print(f"เกิดข้อผิดพลาดในการดึงข้อมูลสำหรับ R: {email}: {str(e)}")
-#         else:
-#             print(f"ผู้ใช้ {email} ยังไม่ได้ยืนยันตัวตน")
-#     print(f"[LOG] get_recruiters_events done in {timeTest.time() - t3:.3f}s")
-#     # เก็บช่วงเวลาว่างและนับจำนวนคู่ที่ว่าง
-#     available_timeslots = []
-#     random_recruiter = random.choice(list(recruiters_events.items()))
-#     # สร้างช่วงเวลาทุกๆ 30 นาที
-#     t4 = timeTest.time()
-#     for hour in range(9, 18):
-#         for minute in [0, 30]:
-#             slot_start = datetime.combine(date, time(hour, minute)).astimezone(timezone.utc)
-#             slot_end = (slot_start + timedelta(minutes=30)).astimezone(timezone.utc)
-            
-#             # แปลงเป็นเวลาท้องถิ่นเพื่อแสดงผล
-#             local_start = slot_start.astimezone().strftime("%H:%M")
-#             local_end = slot_end.astimezone().strftime("%H:%M")
-#             time_slot_key = f"{local_start}-{local_end}"
-            
-#             # ตรวจสอบคู่ที่ว่าง
-#             available_recuiter_count = 0
-#             available_recuiter = []
-            
-#             for recruiter_email, recruiter_data in [random_recruiter]:
-#                 recruiter_events = recruiter_data['events']
-#                 recruiter_name = recruiter_data['name']
-                
-#                 # ตรวจสอบว่าทั้งคู่ว่างหรือไม่
-#                 recruiter_is_available = is_available(recruiter_events, slot_start, slot_end)
-                
-#                 if recruiter_is_available:
-#                     available_recuiter_count += 1
-#                     # เพิ่มข้อมูลคู่ที่ว่าง
-#                     available_recuiter.append({
-#                         "recruiter": f"{recruiter_name}"
-#                     })
-            
-#             # เก็บข้อมูลช่วงเวลาที่มีคู่ว่างอย่างน้อย 1 คู่
-#             if available_recuiter_count > 0:
-#                 available_timeslots.append({
-#                     "time_slot": time_slot_key,
-#                     "available_recuiter_count": available_recuiter_count,
-#                     "available_recuiter": available_recuiter
-#                 })
-#     print(f"[LOG] find_available_time_slots done in {timeTest.time() - t4:.3f}s")            
-  
-#    # แปลงข้อมูลเพื่อสร้างข้อความและปุ่มสำหรับ LINE
-#     slot_texts = []
-    
-#     # สร้างรูปแบบวันที่แบบไทย
-#     thai_date = create_thai_date_label(request.date)
-    
-#     # # เตรียมข้อมูลสำหรับปุ่ม quick reply
-#     # slot_items = []
-#     # for i, slot in enumerate(available_timeslots[:12], start=1):
-#     #     time_slot = slot["time_slot"]
-#     #     # pairs_text = "\n   " + "\n   ".join([f"👥{pair['pair']}" for pair in slot["available_recuiter"]])
-#     #     slot_text = f"{i}. เวลา {time_slot}"
-#     #     slot_texts.append(slot_text)
-        
-#     #     # เพิ่มข้อมูลสำหรับปุ่ม
-#     #     slot_items.append((f"({i})", time_slot))
-    
-#     # # สร้างปุ่ม quick reply
-#     # items = create_line_quick_reply_items(slot_items, max_items=12, add_back_button=True)
-    
-#     # # สร้างข้อความ
-#     # message_text = f"กรุณาเลือกช่วงเวลาที่ต้องการ:\nวันที่ : {thai_date}\n" + "\n".join(slot_texts)
-    
-#     # line_message = {
-#     #     "type": "text",
-#     #     "text": message_text,
-#     #     "quickReply": {
-#     #         "items": items
-#     #     }
-#     # }
-#     # เตรียมข้อมูลสำหรับปุ่ม quick reply
-#     slot_items = []
-#     slot_texts = []
-#     for i, slot in enumerate(available_timeslots[:12], start=1):
-#         time_slot = slot["time_slot"]
-#         slot_text = f"🕒 {i}. เวลา {time_slot}"
-#         slot_texts.append(slot_text)
-        
-#         # เพิ่มข้อมูลสำหรับปุ่ม (ใช้ช่วงเวลาเป็น label และ text)
-#         slot_items.append((time_slot, time_slot))
 
-#     # สร้างปุ่ม quick reply
-#     items = create_line_quick_reply_items(slot_items, max_items=12, add_back_button=True)
-
-#     # สร้างข้อความ
-#     message_text = f"📅 วันที่ : {thai_date}\n🗓️ กรุณาเลือกช่วงเวลาที่ต้องการ" 
-
-#     line_message = {
-#         "type": "text",
-#         "text": message_text,
-#         "quickReply": {
-#             "items": items
-#         }
-#     }
-    
-#     response = {
-#         "line_payload": [line_message],
-#         "date": request.date,
-#         "recruiter": f"{recruiter_name}",
-#         "email_recruiter": f"{recruiter_email}",
-#         "number": 888
-#     }
-    
-#     print(f"[LOG] API done at {timeTest.time() - start:.3f}s")
-    
-#     return JSONResponse(
-#         content=response,
-#         headers={"Response-Type": "object"}
-#     )
-
-# # API 3: ดึงรายละเอียดของคู่ที่ว่างในช่วงเวลาที่เลือก
-# @app.post("/events/available-pairs")
-# async def get_available_pairs(request: TimeSlotRequest):
-#     """
-#     ดึงข้อมูลคู่ที่ว่างในช่วงเวลาที่ระบุ
-#     แสดงรายละเอียดของ manager และ recruiter ที่ว่างในช่วงเวลานั้น
-#     """
-#     start = timeTest.time()
-#     print(f"[START] API started at {start:.6f}")
-    
-#     # ใช้ฟังก์ชัน get_people เพื่อรับรายชื่ออีเมลผู้ใช้แยกตามประเภท M และ R
-#     t1 = timeTest.time()
-#     users_dict = get_people(
-#         location=request.location,
-#         english_min=request.english_min,
-#         exp_kind=request.exp_kind,
-#         age_key=request.age_key
-#     )
-#     print(f"[LOG] get_people done in {timeTest.time() - t1:.3f}s")
-    
-#     # แยกเวลาเริ่มต้นและสิ้นสุดจาก time_slot
-#     time_parts = request.time_slot.split("-")
-#     start_time_str = time_parts[0]
-#     end_time_str = time_parts[1]
-    
-#     # สร้าง datetime object
-#     date = datetime.fromisoformat(request.date).date()
-#     start_hour, start_minute = map(int, start_time_str.split(":"))
-#     end_hour, end_minute = map(int, end_time_str.split(":"))
-    
-#     slot_start = datetime.combine(date, time(start_hour, start_minute)).astimezone(timezone.utc)
-#     slot_end = datetime.combine(date, time(end_hour, end_minute)).astimezone(timezone.utc)
-    
-#     # สร้างช่วงวันสำหรับดึงข้อมูลปฏิทิน (เพื่อดึงข้อมูลทั้งวัน)
-#     start_datetime = datetime.combine(date, time(0, 0, 0)).astimezone(timezone.utc)
-#     end_datetime = datetime.combine(date, time(23, 59, 59)).astimezone(timezone.utc)
-    
-#     time_min = start_datetime.strftime("%Y-%m-%dT%H:%M:%SZ")
-#     time_max = end_datetime.strftime("%Y-%m-%dT%H:%M:%SZ")
-    
-#     # ดึงข้อมูลกิจกรรมแบบขนาน
-#     managers_events, recruiters_events = await fetch_all_users_events(users_dict, time_min, time_max)
-    
-#     # เก็บคู่ที่ว่างในช่วงเวลาที่ระบุ
-#     available_pairs = []
-#     t4 = timeTest.time()
-    
-#     for manager_email, manager_data in managers_events.items():
-#         manager_name = manager_data['name']
-#         manager_events = manager_data['events']
-        
-#         for recruiter_email, recruiter_data in recruiters_events.items():
-#             recruiter_name = recruiter_data['name']
-#             recruiter_events = recruiter_data['events']
-            
-#             # ตรวจสอบว่าทั้งคู่ว่างหรือไม่
-#             manager_is_available = is_available(manager_events, slot_start, slot_end)
-#             recruiter_is_available = is_available(recruiter_events, slot_start, slot_end)
-            
-#             if manager_is_available and recruiter_is_available:
-#                 available_pairs.append({
-#                     "pair": f"{manager_name}-{recruiter_name}",
-#                     "manager": {
-#                         "email": manager_email,
-#                         "name": manager_name
-#                     },
-#                     "recruiter": {
-#                         "email": recruiter_email,
-#                         "name": recruiter_name
-#                     }
-#                 })
-                
-#     print(f"[LOG] get_available_pairs done in {timeTest.time() - t4:.3f}s")
-    
-#     # สร้างข้อความและตัวเลือกในรูปแบบ LINE Message
-#     message_text = f"กรุณาเลือก Manager-Recruiter ที่จะนัด\nเวลา {request.time_slot}\n"
-    
-#     # เตรียมข้อมูลสำหรับปุ่ม quick reply
-#     pair_items = []
-#     for i, pair_detail in enumerate(available_pairs, start=1):
-#         pair_name = pair_detail["pair"]
-#         message_text += f"   {i}.👥 {pair_name}\n"
-        
-#         # เพิ่มข้อมูลสำหรับปุ่ม
-#         if i < 13:  # จำกัดที่ 12 รายการ + ปุ่มย้อนกลับ
-#             pair_items.append((f"({i})", pair_name))
-    
-#     # สร้างปุ่ม quick reply
-#     items = create_line_quick_reply_items(pair_items, max_items=12, add_back_button=True)
-    
-#     line_message = {
-#         "type": "text",
-#         "text": message_text,
-#         "quickReply": {
-#             "items": items
-#         }
-#     }
-    
-#     # สร้าง response ในรูปแบบของ LINE Payload
-#     response = {
-#         "line_payload": [line_message],
-#         "date": request.date,
-#         "time_slot": request.time_slot,
-#         "available_pairs": available_pairs
-#     }
-    
-#     print(f"[LOG] API done in {timeTest.time() - start:.3f}s")
-    
-#     return JSONResponse(
-#         content=response,
-#         headers={"Response-Type": "object"}
-#     )
-
-# @app.post("/events/create-bulk")
-# def create_bulk_events(event_request: BulkEventRequest):
-#     """สร้างการนัดหมายโดยใช้ชื่อ name2 ในการค้นหาอีเมล และใช้อีเมลนั้นสร้างนัดให้ตัวเอง"""
-#     start = timeTest.time()
-    
-#     # แมปสถานที่จากภาษาไทยเป็นภาษาอังกฤษ
-#     location_mapping = {
-#         "สีลม": "Silom",
-#         "อโศก": "Asoke", 
-#         "ภูเก็ต": "Phuket",
-#         "พัทยา": "Pattaya",
-#         "สมุย": "Samui",
-#         "หัวหิน": "Huahin",
-#         "เชียงใหม่": "Chiangmai"
-#     }
-    
-#     try:
-#         # แปลงสถานที่จากภาษาไทยเป็นภาษาอังกฤษ
-#         english_location = location_mapping.get(event_request.location, event_request.location)
-        
-#         # แปลงเวลาให้เป็นรูปแบบ ISO
-#         try:
-#             start_time, end_time = convert_to_iso_format(event_request.date, event_request.time)
-#         except ValueError as e:
-#             return JSONResponse(
-#                 content={
-#                     "message": "รูปแบบวันที่หรือเวลาไม่ถูกต้อง",
-#                     "error": str(e),
-#                     "line_payload": [{
-#                         "type": "text",
-#                         "text": f"รูปแบบวันที่หรือเวลาไม่ถูกต้อง: {str(e)}"
-#                     }]
-#                 },
-#                 headers={"Response-Type": "object"}
-#             )
-        
-#         # ค้นหาอีเมลจากชื่อและพื้นที่
-#         try:
-#             user_info = find_email_from_name(event_request.name2, event_request.location)
-#             user_email = user_info["email"]
-#             user_name = user_info["name"]
-#         except Exception as e:
-#             return JSONResponse(
-#                 content={
-#                     "message": "ไม่พบข้อมูลผู้ใช้",
-#                     "error": str(e),
-#                     "line_payload": [{
-#                         "type": "text",
-#                         "text": f"ไม่พบข้อมูลผู้ใช้: {str(e)}"
-#                     }]
-#                 },
-#                 headers={"Response-Type": "object"}
-#             )
-        
-#         # ตรวจสอบว่าผู้ใช้ได้ยืนยันตัวตนแล้วหรือไม่
-#         if not is_token_valid(user_email):
-#             line_response = {
-#                 "type": "text",
-#                 "text": "ไม่สามารถสร้างการนัดหมายได้ เนื่องจากผู้ใช้ยังไม่ได้ยืนยันตัวตน"
-#             }
-            
-#             return JSONResponse(
-#                 content={
-#                     "message": "ผู้ใช้ยังไม่ได้ยืนยันตัวตน",
-#                     "invalid_user": user_email,
-#                     "line_payload": [line_response]
-#                 },
-#                 headers={"Response-Type": "object"}
-#             )
-            
-#         # รับ credentials ของผู้ใช้
-#         token_entry = get_token(user_email)
-#         creds = Credentials(
-#             token=token_entry.access_token,
-#             refresh_token=token_entry.refresh_token,
-#             token_uri="https://oauth2.googleapis.com/token",
-#             client_id=CLIENT_ID,
-#             client_secret=CLIENT_SECRET,
-#             scopes=SCOPES
-#         )
-        
-#         # สร้าง service สำหรับผู้ใช้
-#         service = build('calendar', 'v3', credentials=creds)
-        
-#         # ตรวจสอบว่ามีกิจกรรมซ้ำซ้อนในช่วงเวลาเดียวกันหรือไม่
-#         time_min = start_time
-#         time_max = end_time
-        
-#         # ตรวจสอบปฏิทินของผู้ใช้
-#         events_result = service.events().list(
-#             calendarId='primary',
-#             timeMin=time_min,
-#             timeMax=time_max,
-#             singleEvents=True,
-#             orderBy='startTime'
-#         ).execute()
-#         events = events_result.get('items', [])
-        
-#         # ถ้ามีกิจกรรมในช่วงเวลาเดียวกัน ให้แจ้งเตือนและยกเลิกการสร้างนัดหมาย
-#         if events:
-#             conflict_events = []
-            
-#             # รวบรวมรายการกิจกรรมที่ซ้ำซ้อน
-#             for event in events:
-#                 conflict_events.append({
-#                     'title': event.get('summary', 'ไม่มีชื่อ'),
-#                     'start': event.get('start', {}).get('dateTime', ''),
-#                     'end': event.get('end', {}).get('dateTime', ''),
-#                     'calendar_owner': user_email
-#                 })
-            
-#             # สร้าง Line Response สำหรับกรณีที่มีกิจกรรมซ้ำซ้อน
-#             line_response = {
-#                 "type": "text",
-#                 "text": f"ขออภัย ไม่สามารถทำการสร้างนัดได้เนื่องจากมีกิจกรรมอยู่แล้ว"
-#             }
-            
-#             return JSONResponse(
-#                 content={
-#                     "message": "มีกิจกรรมซ้ำซ้อนในช่วงเวลาเดียวกัน",
-#                     "conflict_events": conflict_events,
-#                     "line_payload": [line_response]
-#                 },
-#                 headers={"Response-Type": "object"}
-#             )
-        
-#         # เตรียมรายชื่อผู้เข้าร่วมเพิ่มเติม
-#         additional_attendees = []
-#         if event_request.attendees:
-#             additional_attendees = [{'email': email} for email in event_request.attendees]
-        
-#         # กำหนดชื่อหัวข้อตามรูปแบบที่ต้องการ
-#         event_summary = f"Onsite Interview : K. {user_name} - {english_location}"
-        
-#         # เตรียมข้อมูลกิจกรรม
-#         event_data = {
-#             'summary': event_summary,
-#             'location': english_location,
-#             'start': {
-#                 'dateTime': start_time,
-#                 'timeZone': 'Asia/Bangkok',
-#             },
-#             'end': {
-#                 'dateTime': end_time,
-#                 'timeZone': 'Asia/Bangkok',
-#             },
-#             'reminders': {
-#                 'useDefault': False,
-#                 'overrides': [
-#                     {'method': 'popup', 'minutes': 10}  # แจ้งเตือน 10 นาทีก่อนการประชุม
-#                 ]
-#             },
-#             'guestsCanSeeOtherGuests': True,
-#             'guestsCanModify': False,
-#             'sendUpdates': 'all'
-#         }
-        
-#         # ผลลัพธ์การดำเนินการ
-#         results = []
-        
-#         # สร้างการนัดหมายโดยใช้อีเมลที่หาได้เป็น organizer
-#         try:
-#             # เพิ่มผู้เข้าร่วม (รวมถึง organizer และผู้เข้าร่วมเพิ่มเติม)
-#             attendees = [
-#                 {'email': user_email, 'responseStatus': 'accepted', 'organizer': True}
-#             ] + additional_attendees
-#             event_data['attendees'] = attendees
-            
-#             # สร้างกิจกรรมในปฏิทิน
-#             created_event = service.events().insert(
-#                 calendarId="primary",
-#                 body=event_data
-#             ).execute()
-            
-#             results.append({
-#                 'email': user_email,
-#                 'name': user_name,
-#                 'success': True,
-#                 'message': 'สร้างการนัดหมายสำเร็จ',
-#                 'event_id': created_event['id'],
-#                 'html_link': created_event['htmlLink']
-#             })
-            
-#         except Exception as e:
-#             print(f"เกิดข้อผิดพลาดในการสร้างการนัดหมาย: {str(e)}")
-#             results.append({
-#                 'email': user_email,
-#                 'name': user_name,
-#                 'success': False,
-#                 'message': f'เกิดข้อผิดพลาด: {str(e)}'
-#             })
-            
-#             # สร้าง Line Response สำหรับกรณีเกิดข้อผิดพลาด
-#             line_response = {
-#                 "type": "text",
-#                 "text": f"เกิดข้อผิดพลาดในการสร้างการนัดหมาย: {str(e)}"
-#             }
-            
-#             print(f"[DEBUG] API done at {timeTest.time() - start:.3f}s")
-#             return JSONResponse(
-#                 content={
-#                     "message": "เกิดข้อผิดพลาดในการสร้างการนัดหมาย",
-#                     "error": str(e),
-#                     "line_payload": [line_response]
-#                 },
-#                 headers={"Response-Type": "object"}
-#             )
-        
-#         # สร้าง Line Response แบบ text ธรรมดา
-#         line_response = {
-#             "type": "text",
-#             "text": f"✅สร้างนัดใน Calendar เรียบร้อย\nหัวข้อ : {event_summary}\n📅วัน : {event_request.date}\n🕒 เวลา : {event_request.time} น.\n👤 ผู้ใช้: K. {user_name}"
-#         }
-        
-#         # คืนค่าข้อมูลพร้อมกับ Line Response Object
-#         print(f"[DEBUG] API done at {timeTest.time() - start:.3f}s")
-#         return JSONResponse(
-#             content={
-#                 "message": f"ดำเนินการสร้างการนัดหมายสำหรับ K. {user_name} ({user_email})",
-#                 "results": results,
-#                 "line_payload": [line_response]
-#             },
-#             headers={"Response-Type": "object"}
-#         )
-            
-#     except Exception as e:
-#         # สร้าง Line Response สำหรับกรณีเกิดข้อผิดพลาด
-#         line_response = {
-#             "type": "text",
-#             "text": f"เกิดข้อผิดพลาดในการสร้างการนัดหมาย: {str(e)}"
-#         }
-        
-#         print(f"[DEBUG] API done at {timeTest.time() - start:.3f}s")
-#         return JSONResponse(
-#             content={
-#                 "message": "เกิดข้อผิดพลาดในการสร้างการนัดหมาย",
-#                 "error": str(e),
-#                 "line_payload": [line_response]
-#             },
-#             headers={"Response-Type": "object"}
-#         )
-
-
-#login
-# API 3: Login - ดึงข้อมูลผู้ใช้และยืนยันตัวตน
-@app.get("/events/{user_email}")
-def get_user_events(
-    user_email: str, 
-    calendar_id: str = "primary",
-    start_date: Optional[str] = None, 
-    end_date: Optional[str] = None):
-    """ดึงข้อมูลกิจกรรมของผู้ใช้คนเดียว และยืนยันตัวตนหากจำเป็น รองรับทั้ง LINE และ Facebook"""
-    # ดึงข้อมูลและยืนยันตัวตนถ้าจำเป็น
-    creds_result = get_credentials(user_email)
-    
-    # ตรวจสอบว่าต้องการการยืนยันตัวตนหรือไม่
-    if isinstance(creds_result, dict) and creds_result.get("requires_auth"):
-        auth_url = creds_result["auth_url"]
-        
-        # เข้ารหัส auth_url และ email เพื่อส่งเป็นพารามิเตอร์
-        encoded_auth_url = quote_plus(auth_url)
-        encoded_email = quote_plus(user_email)
-        
-        # สร้าง URL ไปยังหน้า redirect ของเรา
-        redirect_page_url = f"{base_url}/auth-redirect?auth_url={encoded_auth_url}&email={encoded_email}"
-        
-        # สร้าง LINE Flex Message
-        line_flex_message = {
-            "type": "flex",
-            "altText": "กรุณาเข้าสู่ระบบ Google Calendar",
-            "contents": {
-                "type": "bubble",
-                "size": "mega",
-                "body": {
-                    "type": "box",
-                    "layout": "vertical",
-                    "spacing": "md",
-                    "contents": [
-                        {
-                            "type": "box",
-                            "layout": "vertical",
-                            "contents": [
-                                {
-                                    "type": "text",
-                                    "text": "เข้าสู่ระบบ Google Calendar",
-                                    "weight": "bold",
-                                    "size": "xl",
-                                    "color": "#4285F4",
-                                    "align": "center",
-                                    "gravity": "center",
-                                    "wrap": True
-                                }
-                            ]
-                        },
-                        {
-                            "type": "box",
-                            "layout": "vertical",
-                            "spacing": "sm",
-                            "contents": [
-                                {
-                                    "type": "text",
-                                    "text": "อีเมล:",
-                                    "size": "sm",
-                                    "color": "#999999"
-                                },
-                                {
-                                    "type": "text",
-                                    "text": user_email,
-                                    "size": "md",
-                                    "weight": "bold",
-                                    "wrap": True
-                                }
-                            ]
-                        }
-                    ]
-                },
-                "footer": {
-                    "type": "box",
-                    "layout": "vertical",
-                    "contents": [
-                        {
-                            "type": "button",
-                            "action": {
-                                "type": "uri",
-                                "label": "🔗เข้าสู่ระบบกับ Google",
-                                "uri": redirect_page_url
-                            },
-                            "style": "primary",
-                            "color": "#4285F4"
-                        }
-                    ]
-                }
-            }
-        }
-
-        # สร้าง Facebook Button Template
-        facebook_button_message = create_facebook_button_template(
-            title="กรุณาเข้าสู่ระบบ Google Calendar",
-            subtitle=f"อีเมล: {user_email}",
-            buttons=[
-                {
-                    "type": "web_url",
-                    "url": redirect_page_url,
-                    "title": "🔗เข้าสู่ระบบกับ Google"
-                }
-            ]
-        )
-        
-        # สร้าง response object พร้อม header ที่ระบุว่าเป็น JSON
-        response_data = {
-            "email": user_email,
-            "is_authenticated": False,
-            "auth_required": True,
-            "auth_url": auth_url,
-            "redirect_url": redirect_page_url,
-            "line_payload": [line_flex_message],
-            "facebook_payload": [facebook_button_message]
-        }
-        
-        return JSONResponse(
-            content=response_data,
-            headers={"Response-Type": "object"}
-        )
-    
-    # ถ้ามี credentials แล้ว ส่งข้อความว่าผู้ใช้เข้าสู่ระบบแล้ว
-    try:
-        # สร้าง LINE Flex Message แจ้งว่าได้เข้าสู่ระบบแล้ว
-        line_already_login_message = {
-            "type": "flex",
-            "altText": "คุณได้ทำการเข้าสู่ระบบแล้ว✅",
-            "contents": {
-                "type": "bubble",
-                "body": {
-                    "type": "box",
-                    "layout": "vertical",
-                    "contents": [
-                        {
-                            "type": "text",
-                            "text": "คุณได้ทำการเข้าสู่ระบบแล้ว✅",
-                            "weight": "bold",
-                            "size": "lg",
-                            "color": "#28a745",
-                            "align": "center"
-                        },
-                        {
-                            "type": "text",
-                            "text": f"อีเมล: {user_email}",
-                            "margin": "md",
-                            "align": "center"
-                        }
-                    ]
-                }
-            }
-        }
-        
-        # สร้าง Facebook Text Message
-        facebook_already_login_message = {
-            "text": f"คุณได้ทำการเข้าสู่ระบบแล้ว✅\nอีเมล: {user_email}"
-        }
-        
-        response_data = {
-            'email': user_email,
-            'is_authenticated': True,
-            'message': "คุณได้ทำการเข้าสู่ระบบแล้ว✅",
-            'line_payload': [line_already_login_message],
-            'facebook_payload': [facebook_already_login_message]
-        }
-        
-        return JSONResponse(
-            content=response_data,
-            headers={"Response-Type": "object"}
-        )
-    except Exception as e:
-        print(f"เกิดข้อผิดพลาดสำหรับ {user_email}: {str(e)}")
-        
-        # สร้าง LINE Flex Message สำหรับแสดงข้อผิดพลาด
-        line_error_flex_message = {
-            "type": "flex",
-            "altText": "เกิดข้อผิดพลาด",
-            "contents": {
-                "type": "bubble",
-                "body": {
-                    "type": "box",
-                    "layout": "vertical",
-                    "contents": [
-                        {
-                            "type": "text",
-                            "text": "เกิดข้อผิดพลาด",
-                            "weight": "bold",
-                            "size": "xl",
-                            "color": "#d9534f"
-                        },
-                        {
-                            "type": "text",
-                            "text": str(e),
-                            "wrap": True,
-                            "margin": "md"
-                        }
-                    ]
-                },
-                "footer": {
-                    "type": "box",
-                    "layout": "vertical",
-                    "contents": [
-                        {
-                            "type": "button",
-                            "action": {
-                                "type": "message",
-                                "label": "ลองใหม่",
-                                "text": f"login {user_email}"
-                            },
-                            "style": "primary"
-                        }
-                    ]
-                }
-            }
-        }
-        
-        # สร้าง Facebook Button Template สำหรับข้อผิดพลาด
-        facebook_error_message = {
-            "text": f"เกิดข้อผิดพลาด: {str(e)}",
-            "quick_replies": [
-                {
-                    "content_type": "text",
-                    "title": "ลองใหม่",
-                    "payload": f"login {user_email}"
-                }
-            ]
-        }
-        
-        error_response = {
-            'email': user_email,
-            'error': str(e),
-            'is_authenticated': False,
-            'line_payload': [line_error_flex_message],
-            'facebook_payload': [facebook_error_message]
-        }
-        print(error_response)
-        return JSONResponse(
-            content=error_response,
-            headers={"Response-Type": "object"}
-        )
-
-
-
-# =========================================================================================================
-@app.post("/test")
-def test(request: LocationRequest):
-    getPeople = get_people(location=request.location)
-    return getPeople
-
-# ======================== ส่วนที่เกี่ยวกับ DB ==================================================================
-@app.get("/auto-refresh")
-def trigger_auto_refresh():
-    """เรียกใช้ auto_refresh_tokens เพื่อทดสอบทันที"""
-    from src.utils.auto_refresh_jobs import auto_refresh_tokens
-    
-    try:
-        # เรียกใช้ฟังก์ชันโดยตรง
-        auto_refresh_tokens()
-        return {"status": "success", "message": "Auto refresh tokens triggered successfully"}
-    except Exception as e:
-        return {"status": "error", "message": f"Error triggering auto refresh: {str(e)}"}
-
-@app.get("/api/tokens", response_model=List[TokenResponse])
-async def read_all_tokens():
-    """
-    API endpoint สำหรับดึงข้อมูลทั้งหมด
-    """
-    tokens = get_all_tokens()
-    if not tokens:
-        return []
-    return tokens
-
-@app.get("/api/tokens/{email}", response_model=TokenResponse)
-async def read_token(email: str):
-    """
-    API endpoint สำหรับดึงข้อมูลตามแต่ละ email
-    """
-    token = get_token(email)
-    if token is None:
-        raise HTTPException(status_code=404, detail=f"ไม่พบข้อมูลสำหรับ email: {email}")
-    return token
-
-# @app.get("/api/emails", response_model=List[EmailResponse])
-@app.get("/api/emails", response_model=Dict[str, List[str]])
-async def read_all_emails():
-    """
-    API endpoint สำหรับดึงเฉพาะ email ทั้งหมด
-    """
-    emails = get_all_emails()
-    if not emails:
-        return []
-    # return emails
-    return {"email": emails}
-
-@app.delete("/api/revoke/{user_email}")
-def revoke_auth(user_email: str):
-    """ยกเลิกการยืนยันตัวตนของผู้ใช้โดยลบข้อมูล token ใน DB"""
-    from src.utils.token_db import delete_token
-    
-    try:
-        result = delete_token(user_email)
-        if result:
-            return {
-                "email": user_email,
-                "success": True,
-                "message": f"ยกเลิกการยืนยันตัวตนสำหรับ {user_email} สำเร็จ"
-            }
-        else:
-            return {
-                "email": user_email,
-                "success": False,
-                "message": f"ไม่พบข้อมูลการยืนยันตัวตนสำหรับ {user_email}"
-            }
-    except Exception as e:
-        return {
-            "email": user_email,
-            "success": False,
-            "message": f"เกิดข้อผิดพลาดในการยกเลิกการยืนยันตัวตน: {str(e)}"
-        }
- 
-@app.post("/api/mock-add-tokens")
-def mock_add_tokens():
-    """
-    สร้างข้อมูลทดสอบ token สำหรับ email จำนวน 50 รายการ
-    """
-    db = SessionLocal()
-    try:
-        for i in range(1, 51):
-            email = f"user{i:02d}@example.com"
-            access_token = f"access_token_{i}"
-            refresh_token = f"refresh_token_{i}"
-            expiry = datetime.utcnow() + timedelta(days=random.randint(1, 30))
-
-            # ตรวจสอบก่อนว่า email นี้มีอยู่แล้วหรือไม่
-            existing = db.query(Token).filter(Token.email == email).first()
-            if not existing:
-                new_token = Token(
-                    email=email,
-                    access_token=access_token,
-                    refresh_token=refresh_token,
-                    expiry=expiry,
-                    updated_at=datetime.utcnow()
-                )
-                db.add(new_token)
-        db.commit()
-        return {"message": "เพิ่ม email mockup แล้ว 50 รายการ"}
-    except Exception as e:
-        db.rollback()
-        return {"error": str(e)}
-    finally:
-        db.close()
-
-# =============================================================================================
-@app.get("/auth-redirect", response_class=HTMLResponse)
-async def auth_redirect(request: Request, auth_url: str, email: str = None):
-    """หน้าเว็บที่แสดงปุ่มเข้าสู่ระบบ Google โดยไม่มีการ redirect อัตโนมัติ"""
-    # ถอดรหัส URL ในกรณีที่มีการเข้ารหัสมา
-    decoded_auth_url = unquote_plus(auth_url)
-    
-    # ส่งค่าตัวแปรไปยัง template
-    return templates.TemplateResponse(
-        "auth_redirect.html", 
-        {
-            "request": request,  
-            "auth_url": decoded_auth_url,
-            "email": email
-        }
-    )
-
-
-
-
-
-
-
-
-#-------------------------------------- Test ---------------------------------------
-# API 1: สุ่ม Recruiter ที่ว่างในวันที่ระบุ
-@app.post("/date-convert")
-async def date_convert(request: DateConvert):
-    thai_date = create_thai_date_label(request.date)
-    return {"thai_date": thai_date}
-    
-@app.post("/select-recruiter-test")
-async def select_available_recruiter_test(request: RecruiterRequest):
+# API 2: สุ่ม Recruiter ใน Google Sheet
+@app.post("/select-recruiter")
+async def select_available_recruiter(request: RecruiterRequest):
     """
     สุ่มเลือก recruiter ที่ว่างในวันที่ระบุ
     รับค่า: date, location
@@ -2057,9 +1142,10 @@ async def select_available_recruiter_test(request: RecruiterRequest):
             content=response,
             status_code=404
         )   
-# API 2: ดึงช่วงเวลาว่างของ recruiter ที่ระบุ (แก้ไขจาก API เดิม)
-@app.post("/events/available-timeslots-test")
-async def get_available_timeslots_test(request: TimeslotRequest):
+
+# API 3: ดึงช่วงเวลาว่างของ recruiter ที่ระบุ (แก้ไขจาก API เดิม)
+@app.post("/events/available-timeslots")
+async def get_available_timeslots(request: TimeslotRequest):
     """
     ดึงข้อมูลช่วงเวลาที่ว่างของ recruiter ที่ระบุในวันที่กำหนด
     แสดงเฉพาะช่วงเวลาว่างในระหว่าง 09:00 - 18:00 โดยแบ่งเป็นช่วงละ 30 นาที
@@ -2186,10 +1272,16 @@ async def get_available_timeslots_test(request: TimeslotRequest):
             "Response-Type": "object"
         }
     )
-    
-# API 3: สร้างการนัดหมาย (แก้ไขใหม่ - ใช้อีเมลโดยตรง)
-@app.post("/events/create-bulk-test")
-def create_bulk_events_test(event_request: BulkEventRequest):
+
+# แปลงวัน iso เป็นวันไทย 
+@app.post("/date-convert")
+async def date_convert(request: DateConvert):
+    thai_date = create_thai_date_label(request.date)
+    return {"thai_date": thai_date}
+
+# API 4: สร้างการนัดหมาย 
+@app.post("/events/create-bulk")
+def create_bulk_events(event_request: BulkEventRequest):
     """สร้างการนัดหมายโดยใช้อีเมลที่ระบุโดยตรง และใช้ name2 ในการตั้งหัวข้อการประชุม (เวอร์ชัน test)"""
     start = timeTest.time()
     thai_date = create_thai_date_label(event_request.date)
@@ -2441,3 +1533,372 @@ def create_bulk_events_test(event_request: BulkEventRequest):
             },
             headers={"Response-Type": "object"}
         )
+    
+#========================================= login ===============================================
+# Login - ดึงข้อมูลผู้ใช้และยืนยันตัวตน
+@app.get("/events/{user_email}")
+def get_user_events(
+    user_email: str, 
+    calendar_id: str = "primary",
+    start_date: Optional[str] = None, 
+    end_date: Optional[str] = None):
+    """ดึงข้อมูลกิจกรรมของผู้ใช้คนเดียว และยืนยันตัวตนหากจำเป็น รองรับทั้ง LINE และ Facebook"""
+    # ดึงข้อมูลและยืนยันตัวตนถ้าจำเป็น
+    creds_result = get_credentials(user_email)
+    
+    # ตรวจสอบว่าต้องการการยืนยันตัวตนหรือไม่
+    if isinstance(creds_result, dict) and creds_result.get("requires_auth"):
+        auth_url = creds_result["auth_url"]
+        
+        # เข้ารหัส auth_url และ email เพื่อส่งเป็นพารามิเตอร์
+        encoded_auth_url = quote_plus(auth_url)
+        encoded_email = quote_plus(user_email)
+        
+        # สร้าง URL ไปยังหน้า redirect ของเรา
+        redirect_page_url = f"{base_url}/auth-redirect?auth_url={encoded_auth_url}&email={encoded_email}"
+        
+        # สร้าง LINE Flex Message
+        line_flex_message = {
+            "type": "flex",
+            "altText": "กรุณาเข้าสู่ระบบ Google Calendar",
+            "contents": {
+                "type": "bubble",
+                "size": "mega",
+                "body": {
+                    "type": "box",
+                    "layout": "vertical",
+                    "spacing": "md",
+                    "contents": [
+                        {
+                            "type": "box",
+                            "layout": "vertical",
+                            "contents": [
+                                {
+                                    "type": "text",
+                                    "text": "เข้าสู่ระบบ Google Calendar",
+                                    "weight": "bold",
+                                    "size": "xl",
+                                    "color": "#4285F4",
+                                    "align": "center",
+                                    "gravity": "center",
+                                    "wrap": True
+                                }
+                            ]
+                        },
+                        {
+                            "type": "box",
+                            "layout": "vertical",
+                            "spacing": "sm",
+                            "contents": [
+                                {
+                                    "type": "text",
+                                    "text": "อีเมล:",
+                                    "size": "sm",
+                                    "color": "#999999"
+                                },
+                                {
+                                    "type": "text",
+                                    "text": user_email,
+                                    "size": "md",
+                                    "weight": "bold",
+                                    "wrap": True
+                                }
+                            ]
+                        }
+                    ]
+                },
+                "footer": {
+                    "type": "box",
+                    "layout": "vertical",
+                    "contents": [
+                        {
+                            "type": "button",
+                            "action": {
+                                "type": "uri",
+                                "label": "🔗เข้าสู่ระบบกับ Google",
+                                "uri": redirect_page_url
+                            },
+                            "style": "primary",
+                            "color": "#4285F4"
+                        }
+                    ]
+                }
+            }
+        }
+
+        # สร้าง Facebook Button Template
+        facebook_button_message = create_facebook_button_template(
+            title="กรุณาเข้าสู่ระบบ Google Calendar",
+            subtitle=f"อีเมล: {user_email}",
+            buttons=[
+                {
+                    "type": "web_url",
+                    "url": redirect_page_url,
+                    "title": "🔗เข้าสู่ระบบกับ Google"
+                }
+            ]
+        )
+        
+        # สร้าง response object พร้อม header ที่ระบุว่าเป็น JSON
+        response_data = {
+            "email": user_email,
+            "is_authenticated": False,
+            "auth_required": True,
+            "auth_url": auth_url,
+            "redirect_url": redirect_page_url,
+            "line_payload": [line_flex_message],
+            "facebook_payload": [facebook_button_message]
+        }
+        
+        return JSONResponse(
+            content=response_data,
+            headers={"Response-Type": "object"}
+        )
+    
+    # ถ้ามี credentials แล้ว ส่งข้อความว่าผู้ใช้เข้าสู่ระบบแล้ว
+    try:
+        # สร้าง LINE Flex Message แจ้งว่าได้เข้าสู่ระบบแล้ว
+        line_already_login_message = {
+            "type": "flex",
+            "altText": "คุณได้ทำการเข้าสู่ระบบแล้ว✅",
+            "contents": {
+                "type": "bubble",
+                "body": {
+                    "type": "box",
+                    "layout": "vertical",
+                    "contents": [
+                        {
+                            "type": "text",
+                            "text": "คุณได้ทำการเข้าสู่ระบบแล้ว✅",
+                            "weight": "bold",
+                            "size": "lg",
+                            "color": "#28a745",
+                            "align": "center"
+                        },
+                        {
+                            "type": "text",
+                            "text": f"อีเมล: {user_email}",
+                            "margin": "md",
+                            "align": "center"
+                        }
+                    ]
+                }
+            }
+        }
+        
+        # สร้าง Facebook Text Message
+        facebook_already_login_message = {
+            "text": f"คุณได้ทำการเข้าสู่ระบบแล้ว✅\nอีเมล: {user_email}"
+        }
+        
+        response_data = {
+            'email': user_email,
+            'is_authenticated': True,
+            'message': "คุณได้ทำการเข้าสู่ระบบแล้ว✅",
+            'line_payload': [line_already_login_message],
+            'facebook_payload': [facebook_already_login_message]
+        }
+        
+        return JSONResponse(
+            content=response_data,
+            headers={"Response-Type": "object"}
+        )
+    except Exception as e:
+        print(f"เกิดข้อผิดพลาดสำหรับ {user_email}: {str(e)}")
+        
+        # สร้าง LINE Flex Message สำหรับแสดงข้อผิดพลาด
+        line_error_flex_message = {
+            "type": "flex",
+            "altText": "เกิดข้อผิดพลาด",
+            "contents": {
+                "type": "bubble",
+                "body": {
+                    "type": "box",
+                    "layout": "vertical",
+                    "contents": [
+                        {
+                            "type": "text",
+                            "text": "เกิดข้อผิดพลาด",
+                            "weight": "bold",
+                            "size": "xl",
+                            "color": "#d9534f"
+                        },
+                        {
+                            "type": "text",
+                            "text": str(e),
+                            "wrap": True,
+                            "margin": "md"
+                        }
+                    ]
+                },
+                "footer": {
+                    "type": "box",
+                    "layout": "vertical",
+                    "contents": [
+                        {
+                            "type": "button",
+                            "action": {
+                                "type": "message",
+                                "label": "ลองใหม่",
+                                "text": f"login {user_email}"
+                            },
+                            "style": "primary"
+                        }
+                    ]
+                }
+            }
+        }
+        
+        # สร้าง Facebook Button Template สำหรับข้อผิดพลาด
+        facebook_error_message = {
+            "text": f"เกิดข้อผิดพลาด: {str(e)}",
+            "quick_replies": [
+                {
+                    "content_type": "text",
+                    "title": "ลองใหม่",
+                    "payload": f"login {user_email}"
+                }
+            ]
+        }
+        
+        error_response = {
+            'email': user_email,
+            'error': str(e),
+            'is_authenticated': False,
+            'line_payload': [line_error_flex_message],
+            'facebook_payload': [facebook_error_message]
+        }
+        print(error_response)
+        return JSONResponse(
+            content=error_response,
+            headers={"Response-Type": "object"}
+        )
+
+@app.get("/auth-redirect", response_class=HTMLResponse)
+async def auth_redirect(request: Request, auth_url: str, email: str = None):
+    """หน้าเว็บที่แสดงปุ่มเข้าสู่ระบบ Google โดยไม่มีการ redirect อัตโนมัติ"""
+    # ถอดรหัส URL ในกรณีที่มีการเข้ารหัสมา
+    decoded_auth_url = unquote_plus(auth_url)
+    
+    # ส่งค่าตัวแปรไปยัง template
+    return templates.TemplateResponse(
+        "auth_redirect.html", 
+        {
+            "request": request,  
+            "auth_url": decoded_auth_url,
+            "email": email
+        }
+    )
+
+
+
+
+# =========================================================================================================
+@app.post("/test")
+def test(request: LocationRequest):
+    getPeople = get_people(location=request.location)
+    return getPeople
+
+# ======================== ส่วนที่เกี่ยวกับ DB ==================================================================
+@app.get("/auto-refresh")
+def trigger_auto_refresh():
+    """เรียกใช้ auto_refresh_tokens เพื่อทดสอบทันที"""
+    from src.utils.auto_refresh_jobs import auto_refresh_tokens
+    
+    try:
+        # เรียกใช้ฟังก์ชันโดยตรง
+        auto_refresh_tokens()
+        return {"status": "success", "message": "Auto refresh tokens triggered successfully"}
+    except Exception as e:
+        return {"status": "error", "message": f"Error triggering auto refresh: {str(e)}"}
+
+@app.get("/api/tokens", response_model=List[TokenResponse])
+async def read_all_tokens():
+    """
+    API endpoint สำหรับดึงข้อมูลทั้งหมด
+    """
+    tokens = get_all_tokens()
+    if not tokens:
+        return []
+    return tokens
+
+@app.get("/api/tokens/{email}", response_model=TokenResponse)
+async def read_token(email: str):
+    """
+    API endpoint สำหรับดึงข้อมูลตามแต่ละ email
+    """
+    token = get_token(email)
+    if token is None:
+        raise HTTPException(status_code=404, detail=f"ไม่พบข้อมูลสำหรับ email: {email}")
+    return token
+
+# @app.get("/api/emails", response_model=List[EmailResponse])
+@app.get("/api/emails", response_model=Dict[str, List[str]])
+async def read_all_emails():
+    """
+    API endpoint สำหรับดึงเฉพาะ email ทั้งหมด
+    """
+    emails = get_all_emails()
+    if not emails:
+        return []
+    # return emails
+    return {"email": emails}
+
+@app.delete("/api/revoke/{user_email}")
+def revoke_auth(user_email: str):
+    """ยกเลิกการยืนยันตัวตนของผู้ใช้โดยลบข้อมูล token ใน DB"""
+    from src.utils.token_db import delete_token
+    
+    try:
+        result = delete_token(user_email)
+        if result:
+            return {
+                "email": user_email,
+                "success": True,
+                "message": f"ยกเลิกการยืนยันตัวตนสำหรับ {user_email} สำเร็จ"
+            }
+        else:
+            return {
+                "email": user_email,
+                "success": False,
+                "message": f"ไม่พบข้อมูลการยืนยันตัวตนสำหรับ {user_email}"
+            }
+    except Exception as e:
+        return {
+            "email": user_email,
+            "success": False,
+            "message": f"เกิดข้อผิดพลาดในการยกเลิกการยืนยันตัวตน: {str(e)}"
+        }
+ 
+@app.post("/api/mock-add-tokens")
+def mock_add_tokens():
+    """
+    สร้างข้อมูลทดสอบ token สำหรับ email จำนวน 50 รายการ
+    """
+    db = SessionLocal()
+    try:
+        for i in range(1, 51):
+            email = f"user{i:02d}@example.com"
+            access_token = f"access_token_{i}"
+            refresh_token = f"refresh_token_{i}"
+            expiry = datetime.utcnow() + timedelta(days=random.randint(1, 30))
+
+            # ตรวจสอบก่อนว่า email นี้มีอยู่แล้วหรือไม่
+            existing = db.query(Token).filter(Token.email == email).first()
+            if not existing:
+                new_token = Token(
+                    email=email,
+                    access_token=access_token,
+                    refresh_token=refresh_token,
+                    expiry=expiry,
+                    updated_at=datetime.utcnow()
+                )
+                db.add(new_token)
+        db.commit()
+        return {"message": "เพิ่ม email mockup แล้ว 50 รายการ"}
+    except Exception as e:
+        db.rollback()
+        return {"error": str(e)}
+    finally:
+        db.close()
+

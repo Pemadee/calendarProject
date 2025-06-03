@@ -553,9 +553,6 @@ def convert_to_iso_format(date, time):
     except Exception as e:
         raise ValueError(f"รูปแบบวันที่หรือเวลาไม่ถูกต้อง: {str(e)}")
 
-
-
-
 def find_email_from_name(name, location):
     """
     รับชื่อของ name2 และ location เพื่อค้นหาอีเมลจาก Google Sheet
