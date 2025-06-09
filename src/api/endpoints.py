@@ -63,8 +63,9 @@ app.add_middleware(
 REDIRECT_URI = 'http://localhost:8000/'  # กำหนด redirect URI 
 # ปอดการแจ้งเตือน INFO:googleapiclient.discovery_cache:file_cache is only supported with oauth2client<4.0.0
 logging.getLogger('googleapiclient.discovery_cache').setLevel(logging.ERROR)
-base_url = os.environ.get('BASE_URL')
-CLIENT_SECRET_FILE = os.getenv("CLIENT_SECRET_FILE")
+base_url = os.environ.get('BASE_URL2')
+
+CLIENT_SECRET_FILE = os.getenv("CLIENT_SECRET_FILE2")
 
 @app.middleware("http")
 async def catch_all(request: Request, call_next):
@@ -1545,7 +1546,7 @@ def get_user_events(
     """ดึงข้อมูลกิจกรรมของผู้ใช้คนเดียว และยืนยันตัวตนหากจำเป็น รองรับทั้ง LINE และ Facebook"""
     # ดึงข้อมูลและยืนยันตัวตนถ้าจำเป็น
     creds_result = get_credentials(user_email)
-    
+    print(base_url)
     # ตรวจสอบว่าต้องการการยืนยันตัวตนหรือไม่
     if isinstance(creds_result, dict) and creds_result.get("requires_auth"):
         auth_url = creds_result["auth_url"]
