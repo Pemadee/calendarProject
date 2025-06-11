@@ -1,9 +1,6 @@
 from typing import List, Optional
 from pydantic import BaseModel
 
-
-
-
 class BulkEventRequest(BaseModel):
     name: str      # รับชื่อของ name2 สำหรับตั้งหัวข้อการประชุม
     email: str      # อีเมลของผู้ที่จะสร้างนัด
