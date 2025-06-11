@@ -30,7 +30,7 @@ from src.api.endpoints import *
 from src.config import *
 from utils.token_db import *
 
-base_url = os.environ.get('BASE_URL2')
+base_url = os.environ.get('BASE_URL')
 # EMAIL_SENDER = os.getenv("EMAIL_to_SEND_MESSAGE")
 # EMAIL_PASSWORD = os.getenv("PASSWORD_EMAIL")
 email_locks = defaultdict(threading.Lock) # สร้าง lock แยกตามอีเมล

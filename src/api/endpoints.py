@@ -63,7 +63,7 @@ app.add_middleware(
 REDIRECT_URI = 'http://localhost:8000/'  # กำหนด redirect URI 
 # ปอดการแจ้งเตือน INFO:googleapiclient.discovery_cache:file_cache is only supported with oauth2client<4.0.0
 logging.getLogger('googleapiclient.discovery_cache').setLevel(logging.ERROR)
-base_url = os.environ.get('BASE_URL2')
+base_url = os.environ.get('BASE_URL')
 
 CLIENT_SECRET_FILE = os.getenv("CLIENT_SECRET_FILE2")
 
@@ -320,8 +320,7 @@ def get_available_dates(request: LocationRequest):
     # สร้าง response ที่รองรับทั้งสองแพลตฟอร์ม
     response = {
         "line_payload": [line_message],
-        "facebook_payload": [facebook_message],
-        "available_dates": available_dates
+        "facebook_payload": [facebook_message]
     }
     
     print(f"[DEBUG] API done at {timeTest.time() - start:.3f}s")
@@ -531,11 +530,7 @@ async def get_available_timeslots(request: TimeslotRequest):
     
     response = {
         "line_payload": [line_message],
-        "facebook_payload": [facebook_message],
-        "date": request.date,
-        "recruiter_email": recruiter_email,
-        "recruiter_name": recruiter_name,
-        "available_slots_count": len(available_timeslots)
+        "facebook_payload": [facebook_message]
     }
     
     print(f"[LOG] Available timeslots API done in {timeTest.time() - start:.3f}s")
@@ -556,7 +551,7 @@ async def date_convert(request: DateConvert):
 # API 4: สร้างการนัดหมาย 
 @app.post("/events/create-bulk")
 def create_bulk_events(event_request: BulkEventRequest):
-    """สร้างการนัดหมายโดยใช้อีเมลที่ระบุโดยตรง และใช้ name2 ในการตั้งหัวข้อการประชุม (เวอร์ชัน test)"""
+    """สร้างการนัดหมายโดยใช้อีเมลที่ระบุโดยตรง และใช้ name ในการตั้งหัวข้อการประชุม (เวอร์ชัน test)"""
     start = timeTest.time()
     thai_date = create_thai_date_label(event_request.date)
     # แมปสถานที่จากภาษาไทยเป็นภาษาอังกฤษ
@@ -598,7 +593,7 @@ def create_bulk_events(event_request: BulkEventRequest):
         
         # ใช้อีเมลและชื่อที่ส่งมาโดยตรง
         user_email = event_request.email
-        user_name = event_request.name2
+        user_name = event_request.name
         
         # ตรวจสอบว่าผู้ใช้ได้ยืนยันตัวตนแล้วหรือไม่
         if not is_token_valid(user_email):
@@ -685,7 +680,7 @@ def create_bulk_events(event_request: BulkEventRequest):
         if event_request.attendees:
             additional_attendees = [{'email': email} for email in event_request.attendees]
         
-        # กำหนดชื่อหัวข้อตามรูปแบบที่ต้องการ (ใช้ name2)
+        # กำหนดชื่อหัวข้อตามรูปแบบที่ต้องการ (ใช้ name)
         event_summary = f"Onsite Interview : K. {user_name} - {english_location}"
         
         # เตรียมข้อมูลกิจกรรม
