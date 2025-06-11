@@ -31,9 +31,6 @@ from src.config import *
 from utils.token_db import *
 
 base_url = os.environ.get('BASE_URL')
-# EMAIL_SENDER = os.getenv("EMAIL_to_SEND_MESSAGE")
-# EMAIL_PASSWORD = os.getenv("PASSWORD_EMAIL")
-email_locks = defaultdict(threading.Lock) # สร้าง lock แยกตามอีเมล
 
 spreadsheet_id = os.environ.get('SPREADSHEET_ID')
 credentialsGsheet = os.environ.get('CREDENTIALS_GOOGLE_SHEET')
@@ -103,6 +100,8 @@ def get_credentials(user_email: str):
             )
         except Exception as e:
             print(f"เกิดข้อผิดพลาดในการโหลด token: {str(e)}")
+
+    # ถ้าไม่มี token หรือไม่ valid → ต้องพิจารณา refresh หรือ auth ใหม่
 
     # ถ้าไม่มี token หรือไม่ valid → ต้องพิจารณา refresh หรือ auth ใหม่
 
