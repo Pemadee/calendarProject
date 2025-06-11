@@ -43,7 +43,7 @@ client = gspread.authorize(credentialsGsheet)
 
 
 
-
+#ฟังก์ชันตรวจสอบ token จากฐานข้อมูล
 def is_token_valid(user_email: str) -> bool:
     """ตรวจสอบว่า token ของผู้ใช้ยังใช้งานได้หรือไม่ (เช็คจาก DB)"""
     t1 = timeTest.time()
@@ -83,6 +83,7 @@ def is_token_valid(user_email: str) -> bool:
     print(f"❌ Token หมดอายุและไม่มี refresh_token สำหรับ {user_email}")
     return False
 
+#เช็ค token จากอีเมล
 def get_credentials(user_email: str):
     """รับ credentials สำหรับการเข้าถึง Google Calendar API"""
     creds = None
@@ -135,6 +136,7 @@ def get_credentials(user_email: str):
             
     return creds
 
+#ฟังก์ชัน Redirect ไปหน้าเว็บเข้าสู่ระบบ
 def _get_auth_redirect(user_email: str):
     flow = InstalledAppFlow.from_client_secrets_file(CLIENT_SECRET_FILE, SCOPES)
     flow.redirect_uri = f"{base_url}/oauth2callback"
@@ -149,74 +151,6 @@ def _get_auth_redirect(user_email: str):
         "auth_url": auth_url,
         "redirect_uri": flow.redirect_uri
     }
-
-def get_calendar_events(user_email: str, calendar_id: str, start_date: str, end_date: str):
-    """ดึงข้อมูลกิจกรรมจาก Google Calendar"""
-    try:
-        # รับ credentials
-        creds = refresh_token_safe(user_email)
-        if not creds:
-            if not creds:
-                return {
-                    "email": user_email,
-                    "calendar_id": calendar_id,
-                    "events": [],
-                    "auth_status": "expired"
-                }
-        # สร้าง service สำหรับเรียกใช้ Calendar API
-        service = build('calendar', 'v3', credentials=creds)
-        
-        # กำหนดช่วงเวลาในการดึงข้อมูล
-        time_min = start_date + "T00:00:00Z" if start_date else datetime.utcnow().isoformat() + "Z"
-        time_max = end_date + "T23:59:59Z" if end_date else (datetime.utcnow() + timedelta(days=7)).isoformat() + "Z"
-        
-        print(f"กำลังดึงข้อมูลสำหรับ {user_email} จาก {time_min} ถึง {time_max}")
-        
-        # ดึงข้อมูลกิจกรรม
-        events_result = service.events().list(
-            calendarId=calendar_id,
-            timeMin=time_min,
-            timeMax=time_max,
-            singleEvents=True,
-            orderBy='startTime'
-        ).execute()
-        
-        events = events_result.get('items', [])
-        print(f"พบ {len(events)} กิจกรรมสำหรับ {user_email}")
-        
-        # แปลงข้อมูลให้เหมาะสม
-        formatted_events = []
-        for event in events:
-            start = event['start'].get('dateTime', event['start'].get('date'))
-            end = event['end'].get('dateTime', event['end'].get('date'))
-            
-            formatted_events.append({
-                'id': event['id'],
-                'summary': event.get('summary', 'ไม่มีชื่อกิจกรรม'),
-                'start': start,
-                'end': end,
-                'creator': event.get('creator', {}),
-                'attendees': event.get('attendees', []),
-                'status': event.get('status', 'confirmed'),
-                'location': event.get('location', ''),
-                'description': event.get('description', '')
-            })
-        
-        return {
-            'email': user_email,
-            'calendar_id': calendar_id,
-            'events': formatted_events,
-            'auth_status': 'authenticated'
-        }
-    except Exception as e:
-        print(f"เกิดข้อผิดพลาดในการดึงข้อมูลสำหรับ {user_email}: {str(e)}")
-        return {
-            'email': user_email,
-            'calendar_id': calendar_id,
-            'events': [],
-            'error': str(e),
-            'auth_status': 'error'
-        }
 
 def add_location_column(df):
     """
@@ -234,6 +168,8 @@ def add_location_column(df):
     df['Location'] = loc_list
     return df
 
+
+#ฟังก์ชันดึงข้อมูลจาก Google Sheet
 def get_people(location=None):
     """
     อ่านข้อมูลจาก Google Sheet แล้วกรองข้อมูลตามเงื่อนไข
@@ -321,6 +257,7 @@ def refresh_token_safe(user_email: str):
 
     return creds
 
+#แปลงวันที่ - เวลา เป็นรูปแบบ ISO
 def convert_to_iso_format(date, time):
     """
     แปลงข้อมูลวันที่และเวลาจากรูปแบบง่ายๆ เป็นรูปแบบ ISO
@@ -344,7 +281,11 @@ def convert_to_iso_format(date, time):
     except Exception as e:
         raise ValueError(f"รูปแบบวันที่หรือเวลาไม่ถูกต้อง: {str(e)}")
 
+
 #========================================== fot API date, timeslot, pairs ======================================
+import asyncio
+
+#เช็ค token ของ recruiter ว่าใช้เข้าถึง google calendar ได้ไหม และเช็คช่วงเวลาของ recruiter ว่าว่างไหม
 def check_recruiter_availability(user_info, date, time_min, time_max):
     """
     เช็ค token และความว่างของ recruiter ในวันที่กำหนด
@@ -406,6 +347,7 @@ def check_recruiter_availability(user_info, date, time_min, time_max):
     except Exception as e:
         print(f"เกิดข้อผิดพลาดในการดึงข้อมูลสำหรับ R: {email}: {str(e)}")
         return None
+
 # เพิ่มฟังก์ชันสำหรับ concurrent token checking
 def check_token_and_fetch_events(user_info, time_min, time_max):
     """
@@ -453,6 +395,7 @@ def check_token_and_fetch_events(user_info, time_min, time_max):
         print(f"เกิดข้อผิดพลาดในการดึงข้อมูลสำหรับ R: {email}: {str(e)}")
         return None
 
+#ตรวจสอบว่าช่วงเวลาที่ระบุว่าว่างหรือไม่ 
 def is_available(events, start_time, end_time):
     """
     ตรวจสอบว่าช่วงเวลาที่ระบุว่างหรือไม่
@@ -491,6 +434,7 @@ def is_available(events, start_time, end_time):
     # หากไม่มีกิจกรรมที่ซ้อนทับกัน แสดงว่าว่าง
     return True
 
+#สร้างวันที่รูปแบบไทย (Ex 10/6/2568)
 def create_thai_date_label(date_str):
     """
     สร้างป้ายชื่อวันที่ในรูปแบบไทย
@@ -506,6 +450,7 @@ def create_thai_date_label(date_str):
     except ValueError:
         return date_str
 
+#ฟังก์ชันสร้างช่วงเวลา
 def create_timeslot_range(date, start_hour=9, end_hour=18, interval_minutes=30):
     """
     สร้างช่วงเวลาทั้งหมดในวันที่กำหนด
@@ -525,6 +470,7 @@ def create_timeslot_range(date, start_hour=9, end_hour=18, interval_minutes=30):
             slots.append((slot_start, slot_end))
     return slots
 
+#สร้างปุ่ม quick reply สำหรับ Facebook
 def create_facebook_quick_replies(items_data, max_items=13, add_back_button=True):
     """
     สร้างปุ่ม quick reply สำหรับ Facebook Messenger
@@ -558,6 +504,7 @@ def create_facebook_quick_replies(items_data, max_items=13, add_back_button=True
     
     return quick_replies
 
+#สร้าง button template สำหรับ facebook (ใช้กับตัว API login)
 def create_facebook_button_template(title, buttons, subtitle=None):
     """
     สร้าง Button Template สำหรับ Facebook Messenger
@@ -584,6 +531,7 @@ def create_facebook_button_template(title, buttons, subtitle=None):
     
     return template
 
+#สร้าง quick reply สำหรับ LINE
 def create_line_quick_reply_items(items_data, max_items=12, add_back_button=True):
     """
     สร้างปุ่ม quick reply สำหรับ LINE
@@ -734,28 +682,6 @@ def create_appointment_success_flex_message(event_summary, date, time, user_name
                                     {
                                         "type": "text",
                                         "text": f"{time} น.",
-                                        "size": "sm",
-                                        "color": "#2C3E50",
-                                        "flex": 5,
-                                        "weight": "bold"
-                                    }
-                                ],
-                                "margin": "sm"
-                            },
-                            {
-                                "type": "box",
-                                "layout": "horizontal",
-                                "contents": [
-                                    {
-                                        "type": "text",
-                                        "text": "👤 Recruiter:",
-                                        "size": "sm",
-                                        "color": "#7F8C8D",
-                                        "flex": 2
-                                    },
-                                    {
-                                        "type": "text",
-                                        "text": f"K. {user_name}",
                                         "size": "sm",
                                         "color": "#2C3E50",
                                         "flex": 5,
