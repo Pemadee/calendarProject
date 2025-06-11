@@ -6,7 +6,7 @@ load_dotenv()
 
 TOKEN_DIR = 'tokens'
 
-CLIENT_SECRET_FILE = os.getenv("CLIENT_SECRET_FILE2")
+CLIENT_SECRET_FILE = os.getenv("CLIENT_SECRET_FILE")
 
 def load_client_secrets(file_path):
     with open(file_path, "r") as f:
